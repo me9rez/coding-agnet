@@ -1,0 +1,58 @@
+:root {
+  --bg-page: #faf9f7;
+  --bg-card: #ffffff;
+  --bg-muted: #f3f2f0;
+  --border: #e8e7e5;
+  --text: #1f1f1f;
+  --text-muted: #6b6b6b;
+  --text-subtle: #9a9a9a;
+  --accent: #1f1f1f;
+  --radius: 1rem;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: 'LXGW WenKai GB', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background-color: var(--bg-page);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Markdown prose tweaks */
+.prose pre {
+  background-color: var(--bg-muted);
+  border-radius: calc(var(--radius) / 2);
+}
+
+.prose code {
+  background-color: var(--bg-muted);
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.35rem;
+  font-size: 0.875em;
+}
+
+.prose p {
+  margin: 0.5em 0;
+}
+
+.prose ul,
+.prose ol {
+  margin: 0.5em 0;
+  padding-left: 1.25em;
+}
+
+.prose li {
+  margin: 0.25em 0;
+}

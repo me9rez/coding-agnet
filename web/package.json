@@ -1,0 +1,51 @@
+{
+  "name": "coding-agent-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "run-p type-check \"build-only {@}\" --",
+    "preview": "vite preview",
+    "test:unit": "vitest",
+    "build-only": "vite build",
+    "type-check": "vue-tsc --build"
+  },
+  "dependencies": {
+    "@iconify-json/carbon": "^1.2.23",
+    "@iconify-json/mdi": "^1.2.3",
+    "@lucide/vue": "^1.21.0",
+    "@unocss/core": "^66.7.3",
+    "@unocss/preset-icons": "^66.7.3",
+    "@unocss/preset-uno": "^66.7.3",
+    "@unocss/reset": "^66.7.3",
+    "highlight.js": "^11.11.1",
+    "marked": "^18.0.5",
+    "pinia": "^3.0.4",
+    "unocss": "^66.7.3",
+    "vue": "^3.5.39",
+    "vue-router": "^5.1.0",
+    "vue-virtual-scroller": "^3.0.4"
+  },
+  "devDependencies": {
+    "@tsconfig/node24": "^24.0.4",
+    "@types/highlight.js": "^10.1.0",
+    "@types/jsdom": "^28.0.3",
+    "@types/marked": "^6.0.0",
+    "@types/node": "^26.0.1",
+    "@unocss/preset-typography": "^66.7.3",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vue/test-utils": "^2.4.11",
+    "@vue/tsconfig": "^0.9.1",
+    "jsdom": "^29.1.1",
+    "npm-run-all2": "^9.0.2",
+    "typescript": "~6.0.3",
+    "vite": "^8.1.0",
+    "vite-plugin-vue-devtools": "^8.1.2",
+    "vitest": "^4.1.9",
+    "vue-tsc": "^3.3.5"
+  },
+  "engines": {
+    "node": "^22.18.0 || >=24.12.0"
+  }
+}
