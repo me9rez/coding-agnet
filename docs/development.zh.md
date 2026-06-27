@@ -1,40 +1,92 @@
 # 开发指南
 
+## 仓库结构
+
+```
+coding-agent/
+├── python/          # Agent 核心：自定义 loop、工具、WebSocket 网关
+├── web/             # 浏览器界面：Vite + Vue 3 + UnoCSS + Pinia
+├── tui/             # 遗留终端界面（供参考）
+├── docs/            # 文档
+└── scripts/         # 构建/发布脚本
+```
+
+## 架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Python 层                                                    │
+│  ┌──────────────┐   ┌─────────────────────────────────────┐ │
+│  │ Agent loop   │──▶│ 工具（bash、read、write、edit、     │ │
+│  │ loop.py      │   │      search、list_dir、load_skill） │ │
+│  └──────┬───────┘   └─────────────────────────────────────┘ │
+│         │                                                    │
+│         ▼                                                    │
+│  ┌─────────────────────────────────────┐                     │
+│  │ WebSocket 网关                       │                     │
+│  │ gateway/ws_server.py :8765          │                     │
+│  └──────────────────┬──────────────────┘                     │
+└─────────────────────┼───────────────────────────────────────┘
+                      │ WebSocket
+┌─────────────────────┼───────────────────────────────────────┐
+│ Web 层              ▼                                         │
+│  ┌─────────────────────────────────────┐                     │
+│  │ GatewayService (services/gateway.ts)│                     │
+│  └──────────────────┬──────────────────┘                     │
+│                     ▼                                         │
+│  ┌─────────────────────────────────────┐                     │
+│  │ Vue 3 + Pinia + UnoCSS              │                     │
+│  │ views/ChatView.vue                  │                     │
+│  └─────────────────────────────────────┘                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+关键设计：
+
+- **自定义 agent loop**（`loop.py`）：逐 chunk 发射 `thinking_delta`、`text_delta`、工具生命周期和轮次边界事件。
+- **WebSocket 网关**（`gateway/ws_server.py`）：将 Python 后端与 Web 前端解耦；同样的协议也支持 stdio，供遗留 TUI 使用。
+- **会话持久化**（`session.py`）：所有对话以 JSONL 形式保存在 `~/.coding-agent/sessions/`。
+- **前端资源打包**：wheel 将 `web/dist` 放入 `coding_agent/web_dist`，最终用户只需安装 Python 包。
+
 ## Python 层
 
-### 依赖
-
-agent 使用 `agent-framework`（Microsoft Agent Framework）作为 LLM 客户端层。
-core 和 openai 包从本地克隆以 editable 模式安装：
+### 环境准备
 
 ```bash
 cd python
-uv venv
-uv pip install -e "../../agent-framework/python/packages/core" --no-deps
-uv pip install -e "../../agent-framework/python/packages/openai" --no-deps
-uv pip install pydantic httpx openai python-dotenv
+uv sync
+```
+
+### 代码检查
+
+```bash
+cd python
+uv run ruff check src/
+uv run ruff format --check src/
+uv run pyright src/
 ```
 
 ### 运行
 
 ```bash
-# CLI 测试模式 — 事件打印到 stderr
-.venv/Scripts/python -m coding_agent.main --test "你的提示词"
+# Web 模式：静态资源服务 + WebSocket 网关（使用已构建的 web/dist）
+uv run python -m coding_agent.main --web
 
-# CLI 测试模式 + 自定义模型
-.venv/Scripts/python -m coding_agent.main --test "Hello" --model deepseek-chat --base-url https://api.deepseek.com/v1
+# 仅启动 WebSocket 网关，供 web 开发使用
+uv run python -m coding_agent.main --ws-port 8765
 
-# Gateway 模式 — 等待 TUI 连接
-.venv/Scripts/python -m coding_agent.main
+# CLI 测试模式，使用 fake client（无需 API key）
+uv run python -m coding_agent.main --test "列出 Python 文件"
+
+# stdio gateway 模式（遗留 TUI）
+uv run python -m coding_agent.main
 ```
 
 ### 添加新工具
 
-1. 在 `tools/coding_tools.py` 中创建 async 函数
-2. 在 `create_coding_tools()` 中注册为 `FunctionTool` 实例
-3. 函数的参数名和 docstring 自动转换为 JSON schema
-
-示例：
+1. 在 `python/src/coding_agent/tools/coding_tools.py` 中新增 `async def`。
+2. 在 `create_coding_tools()` 中注册为 `FunctionTool`。
+3. 参数名和 docstring 会自动转换为 JSON schema。
 
 ```python
 async def _my_tool(param1: str, param2: int = 42) -> str:
@@ -42,115 +94,88 @@ async def _my_tool(param1: str, param2: int = 42) -> str:
     return f"结果: {param1}, {param2}"
 
 # 在 create_coding_tools() 中：
-FunctionTool(name="my_tool", description="工具描述", func=_my_tool),
+FunctionTool(name="my_tool", description="工具功能描述。", func=_my_tool),
 ```
 
-## TUI 层
+## Web 层
 
-### 依赖
-
-TUI 使用 `@simon_he/vue-tui` 进行终端渲染，`tsdown` 进行构建。
+### 环境准备
 
 ```bash
-cd tui
-npm install
+cd web
+pnpm install
 ```
 
 ### 开发流程
 
 ```bash
-# 类型检查
-npm run type-check
+# 终端 1：启动 WebSocket 网关
+cd python
+uv run python -m coding_agent.main --ws-port 8765
 
-# 构建
-npm run build      # tsdown
-
-# 开发（构建 + 运行）
-npm run dev        # 构建后立即执行
+# 终端 2：启动 Vite 开发服务器
+cd web
+pnpm dev
 ```
 
-### 架构
+开发服务器默认连接 `ws://127.0.0.1:8765` 的网关。
 
-TUI 是单页终端应用，包含：
+### 检查
 
-- **main.ts**: 入口 — 创建 terminal app、stdout renderer、stdin driver
-- **app.ts**: 渲染函数组件 — 使用 `h()` 调用构建 UI 树
-- **gatewayClient.ts**: 管理 Python 子进程 — 启动、读 stdout、写 stdin
-- **gatewayTypes.ts**: 所有 gateway 事件的 TypeScript 类型定义
-
-### 组件层次
-
-```
-createTerminalApp() → 挂载 App 组件
-  └── App (渲染函数)
-      ├── 标题栏 (TText)
-      ├── 分隔线 (TText)
-      ├── 消息列表 (每条消息一个 TBox)
-      │   ├── 用户文本 (TBox + TText)
-      │   ├── 助手文本 (TBox + TText)
-      │   ├── Thinking 块 (TBox + TText, 可折叠)
-      │   ├── 工具执行 (TBox + TText, 可折叠)
-      │   └── 错误 (TBox + TText)
-      ├── 流式区域 (TBox + TText)
-      ├── 状态指示 (TText)
-      ├── Token 栏 (TText)
-      └── 输入行 (TBox + TText)
+```bash
+cd web
+pnpm type-check
+pnpm test:unit --run
+pnpm build
 ```
 
-### 事件流
+## 打包与发布
 
+PowerShell 助手脚本会自动构建前端并生成 wheel：
+
+```powershell
+# 在仓库根目录执行
+.\scripts\build-package.ps1
+
+# 本地测试安装
+uv tool install --reinstall python/dist/coding_agent-*.whl
+
+# 发布到 PyPI（需配置 UV_PUBLISH_TOKEN 或 PyPI 凭证）
+.\scripts\build-package.ps1 -Publish
 ```
-GatewayEvent → handleEvent() → transcript[] / streaming / token count
-                              → render() → VNode tree → 终端输出
-```
+
+包元数据见 `python/pyproject.toml`，运行时资源定位逻辑见 `python/src/coding_agent/main.py:_default_web_root()`。
 
 ## 测试
 
-### Python 单元测试
+### 单元/集成测试
 
-```python
-import asyncio
-from agent_framework._types import Message
-from coding_agent.tools.coding_tools import create_coding_tools
-from coding_agent.loop import run_coding_agent
-
-# 使用 fake client（无需 API key）
-from coding_agent.main import _FakeClient
-
-async def test():
-    client = _FakeClient()
-    messages = [Message(role="user", contents=["Hello"])]
-    tools = create_coding_tools()
-    events = []
-    await run_coding_agent(client, messages, tools, on_event=events.append)
-    print(f"生成了 {len(events)} 个事件")
-
-asyncio.run(test())
+```bash
+cd web
+pnpm test:unit --run
 ```
 
-### 完整集成测试
-
-需要 `DEEPSEEK_API_KEY` 环境变量：
+Python 测试目前以临时方式运行：
 
 ```bash
 cd python
-.venv/Scripts/python -m coding_agent.main --test "执行 echo hello"
+# fake client 流程验证（无需 API key）
+uv run python -m coding_agent.main --test "hello"
+
+# 真实 LLM 验证（需 API key）
+uv run python -m coding_agent.main --test "执行 echo hello"
 ```
 
 ## 常见问题
 
 ### "No module named 'coding_agent'"
 
-确保 `PYTHONPATH` 包含 `python/src`，或者从 `python/` 目录运行。
+从 `python/` 目录运行，或将 `python/src` 加入 `PYTHONPATH`。
 
-### TUI 显示 "Cannot find module"
+### Web 界面空白
 
-先执行 `npm install`，然后执行 `npm run build`。
+先构建前端（`cd web && pnpm build`），或直接使用打包脚本（会自动构建）。
 
-### Python 子进程 "module not found"
+### WebSocket 连接失败
 
-TUI 在 `gatewayClient.ts` 中自动设置 `PYTHONPATH`。如果路径不同，更新 `pythonSrc` 变量。
-
-### 更新依赖后出现类型错误
-
-tsconfig 使用严格模式。执行 `npx tsc --noEmit` 并修复报告的问题。
+确认网关已运行在 Web 客户端期望的端口上（默认 `8765`）。

@@ -16,7 +16,6 @@ uv sync                    # 安装依赖
 ruff check src/            # lint
 ruff format --check src/   # 格式化检查
 pyright src/               # 类型检查 (pyright)
-.venv/Scripts/python -m mypy src    # 类型检查 (mypy)
 ```
 
 - 构建系统：hatchling，依赖管理：uv（不是 pip）
@@ -49,6 +48,25 @@ pnpm start                 # 运行构建产物
 所有配置在 `~/.coding-agent/settings.json`，支持 model/base_url/api_key/thinking_level/token budgets/max_turns。
 
 用户 skill 在 `~/.coding-agent/skills/`，项目 skill 在根 `skills/`。
+
+## 打包与发布
+
+web 前端构建产物会随 Python wheel 一起分发，用户安装后即可通过 `coding-agent --web` 直接运行。
+
+```powershell
+# 一键构建 whl（含 web/dist）
+.\scripts\build-package.ps1
+
+# 本地测试安装
+uv tool install --reinstall python/dist/coding_agent-*.whl
+coding-agent --web
+
+# 构建并发布到 PyPI（需配置 UV_PUBLISH_TOKEN 或 PyPI 凭证）
+.\scripts\build-package.ps1 -Publish
+```
+
+- 包名与入口脚本在 `python/pyproject.toml` 中定义。
+- 运行时会优先使用 wheel 内嵌的 `coding_agent/web_dist` 资源，开发环境回退到 `web/dist`。
 
 ## 无 CI / 无 pre-commit
 

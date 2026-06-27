@@ -1,189 +1,84 @@
 # Coding Agent
 
-A lightweight coding agent with fine-grained event streaming, JSON-RPC gateway, and Vue TUI terminal interface.
+A lightweight, self-hosted coding assistant that runs in your terminal **and** your browser. Tell it what you want, and it will read files, run shell commands, edit code, search your project, and explain every step in real time.
 
-## Architecture
+![Empty state](docs/assets/screenshots/empty-state.png)
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│ Python layer                                                │
-│                                                              │
-│  ┌─────────────────────┐   ┌─────────────────────────────┐   │
-│  │ Agent Loop          │   │ Tools                       │   │
-│  │ run_coding_agent()  │──▶│ bash, read, write,          │   │
-│  │ custom loop with    │   │ edit, search, list_dir,     │   │
-│  │ fine-grained events │   │ load_skill                  │   │
-│  └─────────┬───────────┘   └─────────────────────────────┘   │
-│            │                                                  │
-│            ▼                                                  │
-│  ┌─────────────────────────────────────┐                      │
-│  │ Gateway (stdio JSON-RPC)            │                      │
-│  │ stdin: {"method":"prompt",...}      │                      │
-│  │ stdout: {"type":"text_delta",...}   │                      │
-│  └──────────────────┬──────────────────┘                      │
-│                     │ spawn subprocess                        │
-├─────────────────────┼────────────────────────────────────────┤
-│ TypeScript layer    │                                         │
-│                     ▼                                         │
-│  ┌─────────────────────────────────────┐                      │
-│  │ GatewayClient                       │                      │
-│  │ gatewayClient.ts — spawns Python    │                      │
-│  │ reads stdout events, sends stdin    │                      │
-│  └──────────────────┬──────────────────┘                      │
-│                     │                                          │
-│                     ▼                                          │
-│  ┌─────────────────────────────────────┐                      │
-│  │ Vue TUI (@simon_he/vue-tui)        │                      │
-│  │ app.ts — render function component  │                      │
-│  │ Main entry: main.ts (createTerminal)│                      │
-│  └─────────────────────────────────────┘                      │
-└──────────────────────────────────────────────────────────────┘
-```
+## Why Coding Agent?
 
-**Key design decisions:**
+- **🔧 Real tools, real actions** — it can run `bash`, read/write/edit files, search code, and load project-specific skills.
+- **⚡ Streaming, explainable output** — see the model's reasoning, tool calls, and live command output as they happen.
+- **🖥️ Clean web UI** — one command starts both the gateway and the web interface; no separate terminal client needed.
+- **💾 Persistent sessions** — conversations are saved locally as JSONL, so you can pick up where you left off.
+- **🔒 Self-hosted** — your API key stays on your machine; everything runs locally.
 
-- **Custom agent loop** (not `create_harness_agent`): emits per-chunk `thinking_delta`, `text_delta`, tool lifecycle events that `AgentResponseUpdate` cannot express.
-- **Gateway pattern**: Python subprocess communicates with TypeScript TUI over stdio JSON-RPC, following Hermes's `tui_gateway` design.
-- **Vue TUI**: `@simon_he/vue-tui` provides terminal rendering with support for browser DOM and real terminals.
+![Chat session](docs/assets/screenshots/chat-session.png)
 
-## Features
+## Quick start
 
-| Feature | Status |
-|---------|--------|
-| LLM provider: DeepSeek / OpenAI chat completions | ✅ |
-| Event streaming: text, thinking, tool call lifecycle | ✅ |
-| Tool: bash shell execution | ✅ |
-| Tool: file read / write / edit (exact replacement) | ✅ |
-| Tool: file search (recursive regex) | ✅ |
-| Tool: directory listing | ✅ |
-| Tool: skill loading | ✅ |
-| System prompt assembly | ✅ |
-| Project context discovery | ✅ |
-| Session persistence (JSONL) | ✅ |
-| Skills system (SKILL.md) | ✅ |
-| Context window compaction | ✅ |
-| Thinking level control (off/low/medium/high) | ✅ |
-| TUI: message collapsing (thinking/tool) | ✅ |
-| TUI: token usage bar | ✅ |
-| Multi-provider configuration | 🔲 |
-| Session branching | 🔲 |
-
-## Project Structure
-
-```
-coding-agent/
-├── docs/
-│   ├── proposal.md         # Original technical proposal
-│   └── protocol.md         # Gateway JSON-RPC protocol spec
-├── python/
-│   ├── pyproject.toml
-│   └── src/coding_agent/
-│       ├── events.py         # 8 fine-grained event types
-│       ├── system_prompt.py  # System prompt builder + project context
-│       ├── session.py        # JSONL session persistence
-│       ├── skills.py         # SKILL.md scanning + progressive loading
-│       ├── compaction.py     # Context window compaction
-│       ├── thinking.py       # Thinking level → provider params
-│       ├── gateway/
-│       │   ├── server.py     # stdio JSON-RPC dispatcher
-│       │   ├── ws_server.py   # WebSocket gateway server
-│       │   └── transport.py  # StdioTransport
-└── tui/
-    ├── package.json
-    ├── tsconfig.json
-    ├── tsdown.config.ts
-    └── src/
-        ├── main.ts           # Terminal app entry
-        ├── app.ts            # Vue render function component
-        ├── gatewayClient.ts  # Python subprocess manager
-        ├── gatewayTypes.ts   # Event type definitions
-        └── components/
-            └── message-list.vue  # Legacy Vue SFC (for reference)
-```
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.14+
-- Node.js 22+
-- pnpm
-- DeepSeek API key (or OpenAI-compatible)
-
-### Setup
+### Install
 
 ```bash
-# Python — dependencies are in pyproject.toml
-cd python
-uv sync
-
-# TUI
-cd ../tui
-pnpm install
+uv tool install coding-agent
 ```
 
-### Configuration
+> Requires Python 3.14+. If you don't have `uv`, install it from [astral.sh/uv](https://astral.sh/uv).
 
-All settings live in ``~/.coding-agent/settings.json``:
+### Configure
+
+Create `~/.coding-agent/settings.json`:
 
 ```json
 {
-  "model": "deepseek-v4-flash",
-  "base_url": "https://api.deepseek.com/v1",
-  "api_key": "sk-xxx",
-  "thinking_level": "medium",
-  "max_context_tokens": 1000000,
-  "max_output_tokens": 384000,
-  "keep_recent_tokens": 600000,
+  "selectedModel": "deepseek/deepseek-v4-flash",
+  "providers": {
+    "deepseek": {
+      "baseUrl": "https://api.deepseek.com/v1",
+      "apiKey": "sk-xxx",
+      "models": [
+        {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
+          "contextWindow": 1000000,
+          "maxTokens": 384000
+        }
+      ]
+    }
+  },
   "max_turns": 25
 }
 ```
 
-User-level skills go in ``~/.coding-agent/skills/``, project skills in ``skills/``.
-
 ### Run
 
 ```bash
-# CLI test mode (standalone, no gateway needed)
-cd python
-uv run python -m coding_agent --test "List Python files"
-
-# Terminal 1: Start the Python WebSocket gateway
-cd python
-uv run python -m coding_agent --ws-port 8765
-
-# Terminal 2: Start the TUI (connects to ws://127.0.0.1:8765)
-cd ../tui
-pnpm dev
+coding-agent --web
 ```
-## Event Reference
 
-The agent loop emits these fine-grained events:
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080) and start typing.
 
-| Event | Payload | Description |
-|-------|---------|-------------|
-| `thinking_delta` | `{delta}` | Reasoning token (Anthropic) |
-| `text_delta` | `{delta}` | Visible text token |
-| `tool_call_start` | `{callId, name, arguments}` | LLM initiated a tool call |
-| `tool_execution_start` | `{callId, name}` | Tool begins execution |
-| `tool_execution_delta` | `{callId, line}` | Incremental tool output |
-| `tool_execution_end` | `{callId, name, ok, exitCode}` | Tool finished |
-| `turn_end` | `{reason}` | Agent turn completed |
-| `done` | `{}` | Entire run finished |
-| `error` | `{message, recoverable}` | Error occurred |
+## Built-in tools
 
-## Gateway Protocol
+| Tool | What it does |
+|------|--------------|
+| `bash` | Execute shell commands and capture output |
+| `read` | Read any file in your project |
+| `write` | Create or overwrite files |
+| `edit` | Make precise text replacements |
+| `search` | Search file contents with regex |
+| `list_dir` | List directory contents |
+| `load_skill` | Load a project or user skill from a `SKILL.md` |
 
-See `docs/protocol.md` for the full JSON-RPC specification.
+## Development
 
-## Tools Reference
+Want to hack on it? See [docs/development.md](docs/development.md) for the architecture, local setup, and contribution workflow.
 
-| Tool | Description |
-|------|-------------|
-| `bash(command, timeout_seconds)` | Execute shell command |
-| `read(path)` | Read a file |
-| `write(path, content)` | Write a file |
-| `edit(path, edits: [{oldText, newText}])` | Exact text replacement |
-| `search(pattern, path)` | Recursive regex search |
-| `list_dir(path)` | Directory listing |
-| `load_skill(skill_name)` | Load a SKILL.md by name |
+## Documentation
+
+- [Development guide](docs/development.md)
+- [Gateway protocol](docs/protocol.md)
+- [Original proposal](docs/proposal.md)
+
+## License
+
+MIT

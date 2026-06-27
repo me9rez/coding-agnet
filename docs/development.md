@@ -1,155 +1,181 @@
 # Development Guide
 
-## Python Layer
+## Repository layout
 
-### Dependencies
+```
+coding-agent/
+├── python/          # Agent core: custom loop, tools, WebSocket gateway
+├── web/             # Browser UI: Vite + Vue 3 + UnoCSS + Pinia
+├── tui/             # Legacy terminal UI (kept for reference)
+├── docs/            # Documentation
+└── scripts/         # Build/publish helpers
+```
 
-The agent uses `agent-framework` (Microsoft Agent Framework) as its LLM client layer.
-The core and openai packages are installed as editable from the local clone:
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Python layer                                                │
+│  ┌──────────────┐   ┌─────────────────────────────────────┐ │
+│  │ Agent loop   │──▶│ Tools (bash, read, write, edit,     │ │
+│  │ loop.py      │   │        search, list_dir, load_skill)│ │
+│  └──────┬───────┘   └─────────────────────────────────────┘ │
+│         │                                                   │
+│         ▼                                                   │
+│  ┌─────────────────────────────────────┐                    │
+│  │ WebSocket gateway                   │                    │
+│  │ gateway/ws_server.py :8765          │                    │
+│  └──────────────────┬──────────────────┘                    │
+└─────────────────────┼───────────────────────────────────────┘
+                      │ WebSocket
+┌─────────────────────┼───────────────────────────────────────┐
+│ Web layer           ▼                                         │
+│  ┌─────────────────────────────────────┐                    │
+│  │ GatewayService (services/gateway.ts)│                    │
+│  └──────────────────┬──────────────────┘                    │
+│                     ▼                                         │
+│  ┌─────────────────────────────────────┐                    │
+│  │ Vue 3 + Pinia + UnoCSS              │                    │
+│  │ views/ChatView.vue                  │                    │
+│  └─────────────────────────────────────┘                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Key design choices:
+
+- **Custom agent loop** (`loop.py`) instead of a prefab harness, so we can emit fine-grained events: `thinking_delta`, `text_delta`, tool lifecycle, and turn boundaries.
+- **WebSocket gateway** (`gateway/ws_server.py`) decouples the Python backend from the web frontend. The same event protocol is also available over stdio for the legacy TUI.
+- **Session persistence** (`session.py`) stores every conversation as JSONL in `~/.coding-agent/sessions/`.
+- **Bundled frontend** — the wheel ships `web/dist` under `coding_agent/web_dist` so end users only need to install the Python package.
+
+## Python layer
+
+### Setup
 
 ```bash
 cd python
-uv venv
-uv pip install -e "../../agent-framework/python/packages/core" --no-deps
-uv pip install -e "../../agent-framework/python/packages/openai" --no-deps
-uv pip install pydantic httpx openai python-dotenv
+uv sync
 ```
 
-### Running
+### Lint / type-check
 
 ```bash
-# CLI test mode — prints events to stderr
-.venv/Scripts/python -m coding_agent.main --test "Your prompt here"
-
-# CLI test with custom model
-.venv/Scripts/python -m coding_agent.main --test "Hello" --model deepseek-chat --base-url https://api.deepseek.com/v1
-
-# Gateway mode — for TUI connection
-.venv/Scripts/python -m coding_agent.main
+cd python
+uv run ruff check src/
+uv run ruff format --check src/
+uv run pyright src/
 ```
 
-### Adding a new tool
+### Run
 
-1. Create an async function in `tools/coding_tools.py`
-2. Register it in `create_coding_tools()` as a `FunctionTool` instance
-3. The tool's parameter names and docstring are automatically converted to JSON schema
+```bash
+# Web mode: static server + WebSocket gateway (uses built web/dist)
+uv run python -m coding_agent.main --web
 
-Example:
+# WebSocket-only gateway for web dev
+uv run python -m coding_agent.main --ws-port 8765
+
+# CLI test mode with the fake client (no API key required)
+uv run python -m coding_agent.main --test "List Python files"
+
+# stdio gateway mode (legacy TUI)
+uv run python -m coding_agent.main
+```
+
+### Adding a tool
+
+1. Add an `async def` in `python/src/coding_agent/tools/coding_tools.py`.
+2. Register it in `create_coding_tools()` as a `FunctionTool`.
+3. Parameter names and the docstring become the JSON schema automatically.
+
 ```python
 async def _my_tool(param1: str, param2: int = 42) -> str:
-    """Description of what this tool does."""
+    """What this tool does."""
     return f"Result: {param1}, {param2}"
 
 # In create_coding_tools():
-FunctionTool(name="my_tool", description="Description...", func=_my_tool),
+FunctionTool(name="my_tool", description="What this tool does.", func=_my_tool),
 ```
 
-## TUI Layer
+## Web layer
 
-### Dependencies
-
-The TUI uses `@simon_he/vue-tui` for terminal rendering and `tsdown` for building.
+### Setup
 
 ```bash
-cd tui
-npm install
+cd web
+pnpm install
 ```
 
 ### Development workflow
 
 ```bash
-# Type check
-npm run type-check
+# Terminal 1: start the WebSocket gateway
+cd python
+uv run python -m coding_agent.main --ws-port 8765
 
-# Build
-npm run build      # tsdown
-
-# Dev (build + run)
-npm run dev        # builds then executes
+# Terminal 2: start the Vite dev server
+cd web
+pnpm dev
 ```
 
-### Architecture
+The dev server proxies/expects the gateway at `ws://127.0.0.1:8765`.
 
-The TUI is a single-page terminal app with:
+### Checks
 
-- **main.ts**: entry point — creates the terminal app, stdout renderer, stdin driver
-- **app.ts**: render function component — builds the UI tree using `h()` calls
-- **gatewayClient.ts**: manages the Python subprocess — spawns, reads stdout, writes stdin
-- **gatewayTypes.ts**: TypeScript type definitions for all gateway events
-
-### Component hierarchy
-
-```
-createTerminalApp() → mounts App component
-  └── App (render function)
-      ├── Title bar (TText)
-      ├── Separator (TText)
-      ├── Message list (TBox per message)
-      │   ├── User text (TBox + TText)
-      │   ├── Assistant text (TBox + TText)
-      │   ├── Thinking block (TBox + TText, collapsible)
-      │   ├── Tool execution (TBox + TText, collapsible)
-      │   └── Error (TBox + TText)
-      ├── Streaming area (TBox + TText)
-      ├── Status indicator (TText)
-      ├── Token bar (TText)
-      └── Input line (TBox + TText)
+```bash
+cd web
+pnpm type-check
+pnpm test:unit --run
+pnpm build
 ```
 
-### Event flow
+## Packaging and publishing
 
+The PowerShell helper bundles the frontend and builds a wheel:
+
+```powershell
+# From the repository root
+.\scripts\build-package.ps1
+
+# Local test install
+uv tool install --reinstall python/dist/coding_agent-*.whl
+
+# Publish to PyPI (requires UV_PUBLISH_TOKEN or PyPI credentials)
+.\scripts\build-package.ps1 -Publish
 ```
-GatewayEvent → handleEvent() → transcript[] / streaming / token count
-                              → render() → VNode tree → terminal output
-```
+
+See `python/pyproject.toml` for package metadata and `python/src/coding_agent/main.py:_default_web_root()` for how the bundled `web_dist` is located at runtime.
 
 ## Testing
 
-### Python unit test
+### Unit / integration tests
 
-```python
-import asyncio
-from agent_framework._types import Message
-from coding_agent.tools.coding_tools import create_coding_tools
-from coding_agent.loop import run_coding_agent
-
-# Use the fake client (no API key needed)
-from coding_agent.main import _FakeClient
-
-async def test():
-    client = _FakeClient()
-    messages = [Message(role="user", contents=["Hello"])]
-    tools = create_coding_tools()
-    events = []
-    await run_coding_agent(client, messages, tools, on_event=events.append)
-    print(f"Generated {len(events)} events")
-
-asyncio.run(test())
+```bash
+cd web
+pnpm test:unit --run
 ```
 
-### Full integration test
-
-Requires `DEEPSEEK_API_KEY` env var:
+Python tests are run ad-hoc:
 
 ```bash
 cd python
-.venv/Scripts/python -m coding_agent.main --test "Run echo hello"
+# Fake client pipeline test
+uv run python -m coding_agent.main --test "hello"
+
+# Real LLM test (requires API key)
+uv run python -m coding_agent.main --test "Run echo hello"
 ```
 
-## Common Issues
+## Common issues
 
 ### "No module named 'coding_agent'"
 
-Ensure `PYTHONPATH` includes `python/src`, or run from the `python/` directory.
+Run from the `python/` directory, or ensure `python/src` is on `PYTHONPATH`.
 
-### TUI shows "Cannot find module"
+### Web UI shows a blank page
 
-Run `npm install` first, then `npm run build`.
+Build the frontend first (`cd web && pnpm build`) or use the packaging script, which does it automatically.
 
-### Python subprocess "module not found"
+### WebSocket connection fails
 
-The TUI sets `PYTHONPATH` automatically in `gatewayClient.ts`. If paths differ, update the `pythonSrc` variable.
-
-### Type errors after dependency update
-
-The tsconfig has strict settings. Run `npx tsc --noEmit` and fix any reported issues.
+Make sure the gateway is running on the port the web client expects (`8765` by default).

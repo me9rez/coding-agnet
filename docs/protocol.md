@@ -1,8 +1,20 @@
 # Gateway JSON-RPC Protocol
 
-The coding agent gateway communicates with the TUI over **stdin/stdout** using **newline-delimited JSON** (one JSON object per line, terminated by `\n`).
+The coding agent gateway exposes the same JSON-RPC message protocol over two transports:
 
-The TUI spawns the Python process as a subprocess:
+- **WebSocket** (`--ws-port`, used by the web UI): each message is a single JSON frame.
+- **stdio** (legacy TUI): newline-delimited JSON over `stdin`/`stdout`.
+
+In both cases every message is one JSON object.
+
+Web UI example:
+```
+WS → {"method":"prompt","params":{"text":"..."}}
+WS ← {"type":"text_delta","delta":"..."}
+WS ← {"type":"done"}
+```
+
+Legacy stdio example:
 ```
 TUI ──stdin──→ {"method":"prompt","params":{"text":"..."}}
 TUI ←─stdout── {"type":"text_delta","delta":"..."}
@@ -11,13 +23,19 @@ TUI ←─stdout── {"type":"done"}
 
 ## Startup
 
-On startup, the gateway emits a `ready` event:
+On startup, the gateway emits a `ready` event. The WebSocket gateway also reports the current working directory:
 
 ```
 ← {"type":"ready"}
 ```
 
-This signals the TUI that the gateway is initialized and ready to accept requests.
+or
+
+```json
+{"type":"ready","workspace":{"name":"coding-agent","path":"/home/user/coding-agent"}}
+```
+
+This signals the client that the gateway is initialized and ready to accept requests.
 
 ## Events (gateway → TUI)
 
@@ -83,6 +101,15 @@ The entire agent run is finished. The TUI should return to idle state.
 ```
 An error occurred. `recoverable: true` means the agent may continue; `false` means the run should stop.
 
+### rpc_response
+```json
+{"type":"rpc_response","id":"req-1","result":[{"id":"abc","title":"hello","messageCount":2,"createdAt":"...","updatedAt":"..."}]}
+```
+```json
+{"type":"rpc_response","id":"req-2","error":{"message":"Session not found"}}
+```
+Response to an RPC request that included an `id`. The client correlates the response by `id`. On success the result is in `result`; on failure an `error` object is returned.
+
 ## Requests (TUI → gateway)
 
 ### prompt
@@ -99,6 +126,49 @@ Send a user message to the agent. If `sessionId` is provided, the gateway resume
 {"method":"cancel","params":{}}
 ```
 Cancel the current agent run. The gateway will emit an `error` event with `recoverable: true`.
+
+### RPC requests
+
+RPC requests include a unique `id` so the gateway can return a matching `rpc_response` event.
+
+#### listSessions
+```json
+{"id":"req-1","method":"listSessions","params":{}}
+```
+Returns a list of session metadata objects, newest first.
+
+#### createSession
+```json
+{"id":"req-2","method":"createSession","params":{"title":"New chat"}}
+```
+Creates a new empty session and persists it. Returns the full session object.
+
+#### loadSession
+```json
+{"id":"req-3","method":"loadSession","params":{"sessionId":"abc123"}}
+```
+Loads a session including its messages.
+
+#### updateSession
+```json
+{"id":"req-4","method":"updateSession","params":{"sessionId":"abc123","title":"Renamed chat"}}
+```
+Updates a session's title.
+
+#### deleteSession
+```json
+{"id":"req-5","method":"deleteSession","params":{"sessionId":"abc123"}}
+```
+Deletes a session. Returns `{"ok": true}` on success.
+
+#### getSettings / updateSettings
+```json
+{"id":"req-6","method":"getSettings","params":{}}
+{"id":"req-7","method":"updateSettings","params":{"selectedModel":"deepseek/deepseek-v4-flash"}}
+```
+Read or update the active provider/model settings.
+
+> RPC requests are implemented by the **WebSocket gateway** (`gateway/ws_server.py`). The legacy stdio gateway only supports `prompt` and `cancel`.
 
 ## Example Conversation
 
