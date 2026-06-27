@@ -56,8 +56,13 @@ def _serialize_event(event: AgentEvent) -> dict[str, Any]:
             return {"type": "tool_execution_delta", "callId": rid, "line": l}
         case ToolExecutionEndEvent(call_id=rid, name=n, ok=ok, exit_code=ec, error=err, result=r):
             return {
-                "type": "tool_execution_end", "callId": rid, "name": n,
-                "ok": ok, "exitCode": ec, "error": err, "result": r,
+                "type": "tool_execution_end",
+                "callId": rid,
+                "name": n,
+                "ok": ok,
+                "exitCode": ec,
+                "error": err,
+                "result": r,
             }
         case TurnEndEvent(reason=r):
             return {"type": "turn_end", "reason": r}
@@ -178,9 +183,8 @@ class GatewayServer:
             self._current_task.cancel()
             try:
                 await self._current_task
-            except (asyncio.CancelledError, Exception):
+            except asyncio.CancelledError, Exception:
                 pass
-
 
     async def _handle_prompt(self, text: str, session_id: str = "") -> None:
         """Run a single prompt, auto-saving session."""

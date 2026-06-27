@@ -178,19 +178,28 @@ def message_to_dict(msg: object) -> dict:
     """Convert an agent-framework Message to a JSON-serialisable dict."""
     contents = []
     for c in getattr(msg, "contents", None) or []:
-        entry = {"type": c.type}
-        if c.type == "text":
+        ctype = c.type
+        # Thinking/reasoning content blocks are persisted via additional_properties
+        # so they are not replayed to the model API on the next turn.
+        if ctype in ("thinking", "reasoning", "text_reasoning"):
+            continue
+        entry = {"type": ctype}
+        if ctype == "text":
             entry["text"] = c.text
-        elif c.type == "function_call":
+        elif ctype == "function_call":
             entry["call_id"] = c.call_id
             entry["name"] = c.name
             entry["arguments"] = c.arguments
-        elif c.type == "function_result":
+        elif ctype == "function_result":
             entry["call_id"] = c.call_id
             entry["name"] = c.name
             entry["result"] = c.result
         contents.append(entry)
-    return {"role": getattr(msg, "role", "user"), "contents": contents}
+    result = {"role": getattr(msg, "role", "user"), "contents": contents}
+    thinking = getattr(msg, "additional_properties", {}).get("thinking")
+    if thinking:
+        result["thinking"] = thinking
+    return result
 
 
 def dict_to_message(d: dict) -> object:
@@ -220,4 +229,12 @@ def dict_to_message(d: dict) -> object:
                     result=c.get("result", ""),
                 )
             )
-    return Message(role=d.get("role", "user"), contents=contents)
+    additional_properties = {}
+    thinking = d.get("thinking")
+    if thinking:
+        additional_properties["thinking"] = thinking
+    return Message(
+        role=d.get("role", "user"),
+        contents=contents,
+        additional_properties=additional_properties if additional_properties else None,
+    )

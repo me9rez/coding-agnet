@@ -10,13 +10,39 @@ import argparse
 import asyncio
 import json
 import logging
+import subprocess
 import sys
+from importlib import resources
+from pathlib import Path
 
-from coding_agent.settings import Settings, resolve_api_key
+from coding_agent.settings import (
+    Settings,
+    _split_selected_model,
+    resolve_api_key,
+    selected_model_config,
+    selected_thinking_level,
+)
 from coding_agent.settings import load as load_settings
 from coding_agent.tools.coding_tools import create_coding_tools
+from coding_agent.web_server import run_static_server
 
 logger = logging.getLogger(__name__)
+
+
+def _default_web_root() -> str:
+    """Return the bundled web frontend directory, falling back to the repo layout in dev.
+
+    When installed as a wheel, the frontend is shipped under ``coding_agent/web_dist``
+    via hatchling force-include. During development it falls back to the repository's
+    ``web/dist`` directory.
+    """
+    try:
+        root = resources.files("coding_agent") / "web_dist"
+        if root.is_dir():
+            return str(root)
+    except Exception:
+        pass
+    return str(Path(__file__).resolve().parents[3] / "web" / "dist")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -27,32 +53,83 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--base-url", default=None, help="Override base URL (default: settings.json)")
     parser.add_argument("--thinking-level", default=None, help="Thinking level: off/low/medium/high")
     parser.add_argument("--ws-port", type=int, default=None, help="WebSocket port (WS mode instead of stdio)")
+    parser.add_argument("--web", action="store_true", help="Serve the web frontend static files")
+    parser.add_argument("--web-port", type=int, default=8080, help="HTTP port for the web static server")
+    parser.add_argument("--web-root", default=_default_web_root(), help="Directory to serve as the web frontend")
     return parser.parse_args(argv)
+
+
+def _free_port(port: int) -> None:
+    """Try to terminate any process listening on the given local port (Windows)."""
+    if sys.platform != "win32":
+        return
+    logger.info("Freeing port %d if occupied", port)
+    # PowerShell approach (preferred on Windows 8+/10+)
+    ps_cmd = (
+        f"Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue | "
+        f"ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps_cmd],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+    # Fallback to netstat + taskkill
+    try:
+        ns = subprocess.run(
+            f"netstat -ano | findstr :{port}",
+            capture_output=True,
+            text=True,
+            shell=True,
+            check=False,
+        )
+        for line in ns.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 5:
+                pid = parts[-1]
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", pid],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+    except Exception:
+        pass
+
 
 def _merge_settings(args: argparse.Namespace) -> Settings:
     """Load settings file, then apply CLI overrides."""
     s = load_settings()
     if args.model:
-        s.model = args.model
+        s.selected_model = args.model
     if args.base_url:
-        s.base_url = args.base_url
-    if args.thinking_level:
-        s.thinking_level = args.thinking_level
+        provider_id, _ = _split_selected_model(s.selected_model)
+        if provider_id in s.providers:
+            s.providers[provider_id]["baseUrl"] = args.base_url
     return s
 
 
 def _build_client(settings: Settings) -> object:
-    """Create the LLM client from settings."""
+    """Create the LLM client from the selected provider/model."""
+    provider_id, model_id = _split_selected_model(settings.selected_model)
+    provider = settings.providers.get(provider_id, {})
+    base_url = provider.get("baseUrl", "")
     api_key = resolve_api_key(settings)
     if api_key:
         from agent_framework_openai._chat_completion_client import RawOpenAIChatCompletionClient
 
         logger.info(
-            "Client: model=%s base_url=%s thinking=%s", settings.model, settings.base_url, settings.thinking_level
+            "Client: provider=%s model=%s base_url=%s",
+            provider_id,
+            model_id,
+            base_url,
         )
         return RawOpenAIChatCompletionClient(
-            model=settings.model,
-            base_url=settings.base_url,
+            model=model_id,
+            base_url=base_url,
             api_key=api_key,
         )
 
@@ -116,14 +193,17 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
         print(line, file=sys.stderr, flush=True)
 
     print(f"User: {prompt}", file=sys.stderr)
+    model_cfg = selected_model_config(settings)
+    thinking_level = selected_thinking_level(settings)
+    max_tok = model_cfg.get("contextWindow") if model_cfg else None
     await run_coding_agent(
         client=client,  # type: ignore[arg-type]
         messages=messages,
         tools=tools,
         on_event=on_event,
         system_prompt=sys_prompt,
-        thinking_level=settings.thinking_level or None,
-        compaction_max_tokens=settings.max_context_tokens,
+        thinking_level=thinking_level,
+        compaction_max_tokens=max_tok,
     )
 
 
@@ -158,6 +238,7 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
     loop.set_exception_handler(_handler)
 
     from coding_agent.session import _SESSIONS_DIR
+
     print(f"Gateway starting, sessions → {_SESSIONS_DIR}", file=sys.stderr, flush=True)
 
     if ws_port:
@@ -182,6 +263,7 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
         )
         await server.run()
 
+
 def main() -> None:
     args = _parse_args()
     logging.basicConfig(
@@ -196,7 +278,29 @@ def main() -> None:
         asyncio.run(_run_test_mode(prompt, settings))
         return
 
+    if args.web:
+        ws_port = args.ws_port or 8765
+        _free_port(args.web_port)
+        _free_port(ws_port)
+        try:
+            run_static_server(args.web_root, port=args.web_port)
+        except FileNotFoundError as exc:
+            logger.error("%s", exc)
+            print(f"Error: {exc}", file=sys.stderr)
+            print("Hint: build the frontend first with 'cd web && pnpm build'.", file=sys.stderr)
+            sys.exit(1)
+        except OSError as exc:
+            logger.error("Cannot start static server: %s", exc)
+            print(f"Error: cannot start static server: {exc}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            asyncio.run(_async_main(settings, ws_port=ws_port))
+        except KeyboardInterrupt:
+            pass
+        return
+
     if args.ws_port:
+        _free_port(args.ws_port)
         try:
             asyncio.run(_async_main(settings, ws_port=args.ws_port))
         except KeyboardInterrupt:
@@ -209,3 +313,7 @@ def main() -> None:
         asyncio.run(_async_main(settings, ws_port=None))
     except KeyboardInterrupt:
         pass
+
+
+if __name__ == "__main__":
+    main()

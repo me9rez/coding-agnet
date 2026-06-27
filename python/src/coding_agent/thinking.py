@@ -36,3 +36,21 @@ def thinking_options_for_level(level: str | None) -> dict:
     if effort is None:
         return {}
     return {"reasoning_effort": effort}
+
+
+def thinking_options_for_model(level: str | None, provider_id: str, model_id: str) -> dict:
+    """Return provider options for the given provider/model.
+
+    DeepSeek only supports ``high`` and ``max`` reasoning effort; other levels
+    are treated as off. To actually receive reasoning_content from DeepSeek,
+    the request must also include ``extra_body={"thinking": {"type": "enabled"}}``.
+    """
+    normalized = (level or "").strip().lower()
+    if provider_id.lower() == "deepseek":
+        if normalized in ("high", "max"):
+            return {
+                "reasoning_effort": normalized,
+                "extra_body": {"thinking": {"type": "enabled"}},
+            }
+        return {}
+    return thinking_options_for_level(level)

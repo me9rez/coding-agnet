@@ -6,12 +6,18 @@ tool interfaces, and project context.
 
 from __future__ import annotations
 
+import logging
+import os
+import platform
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+logger = logging.getLogger(__name__)
 
 # ── Data types ──────────────────────────────────────────────────
 
@@ -24,6 +30,8 @@ class ProjectContext:
     git_root: str | None = None
     language_hints: Sequence[str] = field(default_factory=tuple)
     ignore_patterns: Sequence[str] = field(default_factory=tuple)
+    os_name: str = ""
+    shell: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,9 +91,32 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
             ctx_lines.append(f"- Languages detected: {', '.join(ctx.language_hints)}")
         if ctx.ignore_patterns:
             ctx_lines.append("- Ignored patterns: " + ", ".join(ctx.ignore_patterns[:5]))
+        if ctx.os_name:
+            ctx_lines.append(f"- OS: {ctx.os_name}")
+        if ctx.shell:
+            ctx_lines.append(f"- Shell: {ctx.shell}")
         parts.append("## Project Context\n" + "\n".join(ctx_lines))
 
+    # OS-specific shell guidance
+    if ctx and ctx.os_name and "Windows" in ctx.os_name:
+        parts.append(
+            "## Windows Shell Guidance\n"
+            "- Prefer PowerShell commands. The `bash` tool runs via `pwsh -NoProfile -Command <cmd>`.\n"
+            "- Avoid Unix-only syntax (e.g. `ls`, `grep`, `cat`, `sed`, single quotes for paths).\n"
+            "- Use Windows-compatible paths and commands when possible."
+        )
+
     return "\n\n".join(parts)
+
+
+def _detect_shell() -> str:
+    """Return a human-readable shell name for the current OS."""
+    if sys.platform == "win32":
+        return "PowerShell (pwsh)"
+    shell = os.environ.get("SHELL", "")
+    if shell:
+        return Path(shell).name
+    return "bash"
 
 
 def discover_project_context(cwd: str | None = None) -> ProjectContext:
@@ -128,9 +159,14 @@ def discover_project_context(cwd: str | None = None) -> ProjectContext:
             if line and not line.startswith("#"):
                 ignore.append(line)
 
+    os_name = f"{platform.system()} {platform.release()}".strip()
+    shell = _detect_shell()
+    logger.info("Detected OS: %s, shell: %s", os_name, shell)
     return ProjectContext(
         cwd=str(root),
         git_root=git_root,
         language_hints=hints,
         ignore_patterns=ignore[:20],
+        os_name=os_name,
+        shell=shell,
     )

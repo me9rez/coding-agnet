@@ -23,10 +23,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-
 @dataclass
 class _ToolResult:
     """Structured result for tools that have exit codes / ok status."""
+
     type: str = "tool_result"
     result: str = ""
     exit_code: int | None = None
@@ -93,7 +93,10 @@ async def _bash(command: str, timeout_seconds: float = 30.0) -> _ToolResult:
         if sys.platform == "win32":
             proc = await asyncio.wait_for(
                 asyncio.create_subprocess_exec(
-                    "pwsh", "-NoProfile", "-Command", command,
+                    "pwsh",
+                    "-NoProfile",
+                    "-Command",
+                    command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     cwd=os.getcwd(),

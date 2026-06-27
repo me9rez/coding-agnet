@@ -67,7 +67,14 @@ async def run_coding_agent(
     max_turns:
         Safety cap on LLM + tool rounds.
     """
-    _emit = on_event or _noop_emit
+    _base_emit = on_event or _noop_emit
+    turn_thinking_parts: list[str] = []
+
+    def _emit(event: AgentEvent) -> None:
+        if isinstance(event, ThinkingDeltaEvent):
+            turn_thinking_parts.append(event.delta)
+        _base_emit(event)
+
     tool_list = list(tools) if tools else []
     tool_map: dict[str, FunctionTool] = {t.name: t for t in tool_list}
     options: dict[str, Any] = {}
@@ -78,6 +85,7 @@ async def run_coding_agent(
     # Thinking level → provider options
     if thinking_level:
         from coding_agent.thinking import thinking_options_for_level
+
         options.update(thinking_options_for_level(thinking_level))
 
     turn = 0
@@ -85,6 +93,7 @@ async def run_coding_agent(
     while turn < max_turns:
         turn += 1
         logger.debug("Turn %d/%d", turn, max_turns)
+        turn_thinking_parts.clear()
 
         # ── 1. Call LLM with streaming ──────────────────────────────
         stream_result = client.get_response(
@@ -104,6 +113,33 @@ async def run_coding_agent(
         # ── 2. Get final response ────────────────────────────────────
         response: ChatResponse = await stream.get_final_response()
 
+        # Collect thinking from content blocks (e.g., Claude) in addition to streamed deltas.
+        content_thinking_parts: list[str] = []
+        for msg in response.messages:
+            if getattr(msg, "role", None) != "assistant":
+                continue
+            for c in getattr(msg, "contents", None) or []:
+                ctype = getattr(c, "type", None)
+                if ctype in ("thinking", "reasoning", "text_reasoning"):
+                    text = getattr(c, "text", None) or getattr(c, "thinking", None) or ""
+                    if text:
+                        content_thinking_parts.append(str(text))
+
+        # Prefer streamed deltas; fall back to content-block thinking to avoid duplication.
+        thinking_text = "".join(turn_thinking_parts)
+        if not thinking_text:
+            thinking_text = "".join(content_thinking_parts)
+
+        # Persist any thinking collected this turn on the assistant message(s)
+        if thinking_text:
+            for msg in response.messages:
+                if getattr(msg, "role", None) == "assistant":
+                    additional = getattr(msg, "additional_properties", None)
+                    if additional is None:
+                        additional = {}
+                        object.__setattr__(msg, "additional_properties", additional)
+                    additional["thinking"] = thinking_text
+
         # Append assistant message(s) to the transcript
         for msg in response.messages:
             _ensure_not_duplicate(messages, msg)
@@ -111,8 +147,7 @@ async def run_coding_agent(
 
         # ── 3. Extract tool calls from the final response ────────────
         pending_calls = _extract_tool_calls(response)
-        logger.info("Extracted %d tool call(s): %s", len(pending_calls),
-                     _tool_call_preview(pending_calls))
+        logger.info("Extracted %d tool call(s): %s", len(pending_calls), _tool_call_preview(pending_calls))
 
         if not pending_calls:
             _emit(TurnEndEvent(reason="complete"))
@@ -189,8 +224,6 @@ async def run_coding_agent(
 # ── Helpers ──────────────────────────────────────────────────────
 
 
-
-
 def _tool_call_preview(calls: list[Any]) -> list[tuple[str, str]]:
     """Return (name, truncated_args) for logging."""
     result: list[tuple[str, str]] = []
@@ -209,12 +242,12 @@ def _process_update(
     emit: Callable[[AgentEvent], None],
 ) -> None:
     """Extract text/thinking events from one ChatResponseUpdate chunk."""
-    # 1. Check raw_representation for thinking deltas (Anthropic)
+    # 1. Check raw_representation for thinking deltas (Anthropic / DeepSeek)
     raw = getattr(update, "raw_representation", None)
     if raw is not None:
         _extract_thinking(raw, emit)
 
-    # 2. Check contents for text
+    # 2. Check contents for text and reasoning
     contents = getattr(update, "contents", None) or []
     for c in contents:
         ctype = getattr(c, "type", None)
@@ -222,6 +255,10 @@ def _process_update(
             text = getattr(c, "text", "") or ""
             if text:
                 emit(TextDeltaEvent(delta=text))
+        elif ctype in ("thinking", "reasoning", "reasoning_content"):
+            thinking = getattr(c, "text", "") or getattr(c, "thinking", "") or getattr(c, "reasoning_content", "") or ""
+            if thinking:
+                emit(ThinkingDeltaEvent(delta=thinking))
 
 
 def _extract_tool_calls(response: ChatResponse) -> list[Content]:
@@ -236,7 +273,29 @@ def _extract_tool_calls(response: ChatResponse) -> list[Content]:
 
 def _extract_thinking(raw: Any, emit: Callable[[AgentEvent], None]) -> None:
     """Extract thinking/reasoning tokens from provider-specific raw data."""
-    rtype = getattr(raw, "type", None) if not isinstance(raw, dict) else raw.get("type")
+    if isinstance(raw, dict):
+        # DeepSeek / OpenAI-style raw chunk: choices[0].delta.reasoning_content
+        for choice in raw.get("choices", []):
+            delta = choice.get("delta", {}) if isinstance(choice, dict) else {}
+            reasoning = delta.get("reasoning_content") if isinstance(delta, dict) else None
+            if reasoning:
+                emit(ThinkingDeltaEvent(delta=str(reasoning)))
+        rtype = raw.get("type")
+        text = raw.get("text")
+        if text:
+            emit(ThinkingDeltaEvent(delta=str(text)))
+        return
+
+    # Handle Pydantic/ChatCompletionChunk-like objects (e.g. from agent-framework)
+    choices = getattr(raw, "choices", None)
+    if choices is not None:
+        for choice in choices:
+            delta = getattr(choice, "delta", None)
+            reasoning = getattr(delta, "reasoning_content", None) if delta is not None else None
+            if reasoning:
+                emit(ThinkingDeltaEvent(delta=str(reasoning)))
+
+    rtype = getattr(raw, "type", None)
     if rtype == "content_block_delta":
         delta = raw.delta if hasattr(raw, "delta") else raw.get("delta", {})  # type: ignore[union-attr]
         d_type = getattr(delta, "type", None) if not isinstance(delta, dict) else delta.get("type")

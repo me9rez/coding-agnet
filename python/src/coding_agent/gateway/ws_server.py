@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import sys
+from pathlib import Path
 from typing import Any
 
 from websockets.asyncio.server import ServerConnection, serve
@@ -26,8 +27,39 @@ from coding_agent.events import (
     ToolExecutionStartEvent,
     TurnEndEvent,
 )
+from coding_agent.session import (
+    create_session,
+    delete_session,
+    list_sessions,
+    load_session,
+    save_session,
+)
+from coding_agent.settings import Settings, _split_selected_model, selected_model_config, selected_thinking_level
+from coding_agent.settings import load as load_settings
+from coding_agent.settings import save as save_settings
+from coding_agent.thinking import thinking_options_for_model
 
 logger = logging.getLogger(__name__)
+
+
+def _session_info_to_dict(info: Any) -> dict[str, Any]:
+    return {
+        "id": info.id,
+        "createdAt": info.created_at,
+        "updatedAt": info.updated_at,
+        "messageCount": info.message_count,
+        "title": info.title,
+    }
+
+
+def _session_data_to_dict(session: Any) -> dict[str, Any]:
+    return {
+        "id": session.id,
+        "title": session.title,
+        "createdAt": session.created_at,
+        "updatedAt": session.updated_at,
+        "messages": session.messages,
+    }
 
 
 def _serialize_event(event: AgentEvent) -> dict[str, Any]:
@@ -44,8 +76,13 @@ def _serialize_event(event: AgentEvent) -> dict[str, Any]:
             return {"type": "tool_execution_delta", "callId": rid, "line": l}
         case ToolExecutionEndEvent(call_id=rid, name=n, ok=ok, exit_code=ec, error=err, result=r):
             return {
-                "type": "tool_execution_end", "callId": rid, "name": n,
-                "ok": ok, "exitCode": ec, "error": err, "result": r,
+                "type": "tool_execution_end",
+                "callId": rid,
+                "name": n,
+                "ok": ok,
+                "exitCode": ec,
+                "error": err,
+                "result": r,
             }
         case TurnEndEvent(reason=r):
             return {"type": "turn_end", "reason": r}
@@ -85,6 +122,7 @@ def _summarize_event(obj: dict[str, Any]) -> str:
         parts.append(f"msg={obj.get('message', '?')[:120]}")
     return " ".join(parts)
 
+
 class WsGatewayServer:
     """WebSocket gateway — one connection, dispatches to agent loop."""
 
@@ -106,6 +144,14 @@ class WsGatewayServer:
         self._session: Any = None
         self._ws: ServerConnection | None = None
         self._emit_tasks: list[asyncio.Task[None]] = []
+        self._workspace = self._detect_workspace()
+
+    def _detect_workspace(self) -> dict[str, str]:
+        from coding_agent.system_prompt import discover_project_context
+
+        ctx = discover_project_context()
+        path = ctx.cwd or str(Path.cwd().resolve())
+        return {"name": Path(path).name, "path": path}
 
     def _emit(self, event: AgentEvent) -> None:
         obj = _serialize_event(event)
@@ -121,10 +167,32 @@ class WsGatewayServer:
         except Exception:
             pass
 
+    def _send_rpc_response(self, request_id: str, result: Any) -> None:
+        if self._ws is None:
+            return
+        obj = {"type": "rpc_response", "id": request_id, "result": result}
+        try:
+            task = asyncio.create_task(self._ws.send(json.dumps(obj, ensure_ascii=False)))
+            self._emit_tasks.append(task)
+            task.add_done_callback(self._emit_tasks.remove)
+        except Exception:
+            pass
+
+    def _send_rpc_error(self, request_id: str, message: str) -> None:
+        if self._ws is None:
+            return
+        obj = {"type": "rpc_response", "id": request_id, "error": {"message": message}}
+        try:
+            task = asyncio.create_task(self._ws.send(json.dumps(obj, ensure_ascii=False)))
+            self._emit_tasks.append(task)
+            task.add_done_callback(self._emit_tasks.remove)
+        except Exception:
+            pass
+
     async def _handle_ws(self, ws: ServerConnection) -> None:
         self._ws = ws
-        logger.info("TUI connected from %s", ws.remote_address)
-        await ws.send(json.dumps({"type": "ready"}))
+        logger.info("Client connected from %s", ws.remote_address)
+        await ws.send(json.dumps({"type": "ready", "workspace": self._workspace}))
 
         async for raw in ws:
             try:
@@ -135,6 +203,7 @@ class WsGatewayServer:
 
             method = request.get("method")
             params = request.get("params", {})
+            request_id = request.get("id")
             if method == "prompt":
                 text = params.get("text", "")
                 session_id = params.get("sessionId", "")
@@ -145,6 +214,90 @@ class WsGatewayServer:
             elif method == "cancel":
                 if self._current_task and not self._current_task.done():
                     self._current_task.cancel()
+            elif method == "listSessions":
+                try:
+                    sessions = list_sessions()
+                    self._send_rpc_response(request_id, [_session_info_to_dict(s) for s in sessions])
+                except Exception as exc:
+                    logger.exception("listSessions failed")
+                    self._send_rpc_error(request_id, str(exc))
+            elif method == "createSession":
+                try:
+                    title = params.get("title", "")
+                    session = create_session(title=title)
+                    save_session(session)
+                    self._send_rpc_response(request_id, _session_data_to_dict(session))
+                except Exception as exc:
+                    logger.exception("createSession failed")
+                    self._send_rpc_error(request_id, str(exc))
+            elif method == "loadSession":
+                try:
+                    session_id = params.get("sessionId", "")
+                    session = load_session(session_id)
+                    if session is None:
+                        self._send_rpc_error(request_id, f"Session not found: {session_id}")
+                    else:
+                        self._send_rpc_response(request_id, _session_data_to_dict(session))
+                except Exception as exc:
+                    logger.exception("loadSession failed")
+                    self._send_rpc_error(request_id, str(exc))
+            elif method == "deleteSession":
+                try:
+                    session_id = params.get("sessionId", "")
+                    ok = delete_session(session_id)
+                    self._send_rpc_response(request_id, {"ok": ok})
+                except Exception as exc:
+                    logger.exception("deleteSession failed")
+                    self._send_rpc_error(request_id, str(exc))
+            elif method == "updateSession":
+                try:
+                    session_id = params.get("sessionId", "")
+                    title = params.get("title", "")
+                    session = load_session(session_id)
+                    if session is None:
+                        self._send_rpc_error(request_id, f"Session not found: {session_id}")
+                    else:
+                        session.title = title
+                        save_session(session)
+                        self._send_rpc_response(request_id, _session_data_to_dict(session))
+                except Exception as exc:
+                    logger.exception("updateSession failed")
+                    self._send_rpc_error(request_id, str(exc))
+            elif method == "getSettings":
+                try:
+                    s = load_settings()
+                    self._send_rpc_response(
+                        request_id,
+                        {
+                            "selectedModel": s.selected_model,
+                            "providers": s.providers,
+                            "max_turns": s.max_turns,
+                        },
+                    )
+                except Exception as exc:
+                    logger.exception("getSettings failed")
+                    self._send_rpc_error(request_id, str(exc))
+            elif method == "updateSettings":
+                try:
+                    s = load_settings()
+                    if "selectedModel" in params:
+                        s.selected_model = params["selectedModel"]
+                    if "providers" in params:
+                        s.providers = params["providers"]
+                    if "max_turns" in params:
+                        s.max_turns = params["max_turns"]
+                    save_settings(s)
+                    self._send_rpc_response(
+                        request_id,
+                        {
+                            "selectedModel": s.selected_model,
+                            "providers": s.providers,
+                            "max_turns": s.max_turns,
+                        },
+                    )
+                except Exception as exc:
+                    logger.exception("updateSettings failed")
+                    self._send_rpc_error(request_id, str(exc))
 
         self._ws = None
 
@@ -152,13 +305,7 @@ class WsGatewayServer:
         from agent_framework._types import Content, Message
 
         from coding_agent.loop import run_coding_agent
-        from coding_agent.session import (
-            create_session,
-            dict_to_message,
-            load_session,
-            message_to_dict,
-            save_session,
-        )
+        from coding_agent.session import dict_to_message, message_to_dict
         from coding_agent.skills import discover_skills, format_skills_for_prompt
         from coding_agent.system_prompt import (
             BuildSystemPromptOptions,
@@ -182,20 +329,23 @@ class WsGatewayServer:
         skills = discover_skills()
         skills_prompt = format_skills_for_prompt(skills)
         ctx = discover_project_context()
-        sys_prompt = build_system_prompt(
-            BuildSystemPromptOptions(project_context=ctx, skills_prompt=skills_prompt)
-        )
+        sys_prompt = build_system_prompt(BuildSystemPromptOptions(project_context=ctx, skills_prompt=skills_prompt))
 
         try:
-            thinking = getattr(self._settings, "thinking_level", "") if self._settings else ""
-            max_tok = getattr(self._settings, "max_context_tokens", None) if self._settings else None
+            settings = self._settings
+            selected = getattr(settings, "selected_model", "") if settings else ""
+            provider_id, model_id = _split_selected_model(selected)
+            model_cfg = selected_model_config(settings) if isinstance(settings, Settings) else None
+            max_tok = model_cfg.get("contextWindow") if model_cfg else None
+            thinking_level = selected_thinking_level(settings) if isinstance(settings, Settings) else None
+            options = thinking_options_for_model(thinking_level, provider_id, model_id)
             await run_coding_agent(
                 client=self._client,
                 messages=messages,  # type: ignore[arg-type]
                 tools=self._tools,
                 on_event=self._emit,
                 system_prompt=sys_prompt,
-                thinking_level=thinking or None,
+                thinking_level=options.get("reasoning_effort") if options else None,
                 compaction_max_tokens=max_tok,
             )
         except asyncio.CancelledError:
@@ -212,6 +362,10 @@ class WsGatewayServer:
             save_session(session)
 
     async def run_forever(self) -> None:
+        from coding_agent.system_prompt import discover_project_context
+
+        ctx = discover_project_context()
+        logger.info("WS gateway starting — OS: %s, shell: %s", ctx.os_name, ctx.shell)
         async with serve(self._handle_ws, self._host, self._port):
             logger.info("WS gateway on ws://%s:%d", self._host, self._port)
             print(f"WS READY ws://{self._host}:{self._port}", file=sys.stderr, flush=True)
