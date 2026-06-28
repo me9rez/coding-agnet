@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import MessageItem from '../MessageItem.vue'
+import MessageItem from '@/components/chat/MessageItem.vue'
 
 describe('MessageItem', () => {
   it('renders user message', () => {
@@ -39,12 +39,12 @@ describe('MessageItem', () => {
           role: 'tool',
           content: '',
           timestamp: Date.now(),
-          toolCall: { callId: 'c1', name: 'bash', arguments: '{"command":"ls"}' },
-          toolExecution: { callId: 'c1', name: 'bash', output: 'file.txt', ok: true, exitCode: 0 },
+          toolCall: { callId: 'c1', name: 'run_command', arguments: '{"command":"ls"}' },
+          toolExecution: { callId: 'c1', name: 'run_command', output: 'file.txt', ok: true, exitCode: 0 },
         },
       },
     })
-    expect(wrapper.text()).toContain('bash')
+    expect(wrapper.text()).toContain('run_command')
     expect(wrapper.text()).toContain('成功')
   })
 })
