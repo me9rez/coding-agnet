@@ -80,7 +80,7 @@ class Settings:
     providers: dict[str, Any] = field(default_factory=_default_providers)
     max_turns: int = 25
     mcp_servers: dict[str, Any] = field(default_factory=dict)
-    workflow_loop: bool = False
+    workflow_loop: bool = True
     tool_approval: dict[str, Any] = field(default_factory=lambda: {"enabled": True})
 
 

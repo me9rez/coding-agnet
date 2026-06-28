@@ -40,9 +40,7 @@ function formatArguments(args: string): string {
       </div>
       <div class="approval-actions">
         <button class="btn btn-approve" @click="approve(request.callId, false)">同意</button>
-        <button class="btn btn-approve-always" @click="approve(request.callId, true)">
-          始终同意
-        </button>
+        <!-- TODO: remember 逻辑尚未实现，先隐藏“始终同意”按钮 -->
         <button class="btn btn-reject" @click="reject(request.callId)">拒绝</button>
       </div>
     </div>

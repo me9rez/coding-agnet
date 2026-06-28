@@ -208,6 +208,7 @@ class WsGatewayServer:
         self._ws: ServerConnection | None = None
         self._emit_tasks: list[asyncio.Task[None]] = []
         self._clients: dict[str, Any] = {}
+        self._connections: set[ServerConnection] = set()
         self._workspace = self._detect_workspace()
         self._pending_approvals: dict[str, Any] = {}
 
@@ -230,14 +231,16 @@ class WsGatewayServer:
         if obj.get("type") not in ("text_delta", "thinking_delta", "tool_execution_delta"):
             fields = _summarize_event(obj)
             print(f"→ {obj.get('type', '?')} {fields}", file=sys.stderr, flush=True)
-        if self._ws is None:
+        if not self._connections:
             return
-        try:
-            task = asyncio.create_task(self._ws.send(json.dumps(obj, ensure_ascii=False)))
-            self._emit_tasks.append(task)
-            task.add_done_callback(self._emit_tasks.remove)
-        except Exception:
-            pass
+        data = json.dumps(obj, ensure_ascii=False)
+        for conn in list(self._connections):
+            try:
+                task = asyncio.create_task(conn.send(data))
+                self._emit_tasks.append(task)
+                task.add_done_callback(self._emit_tasks.remove)
+            except Exception:
+                self._connections.discard(conn)
 
     def _send_rpc_response(self, request_id: str, result: Any) -> None:
         if self._ws is None:
@@ -263,124 +266,128 @@ class WsGatewayServer:
 
     async def _handle_ws(self, ws: ServerConnection) -> None:
         self._ws = ws
+        self._connections.add(ws)
         logger.info("Client connected from %s", ws.remote_address)
-        await ws.send(json.dumps({"type": "ready", "workspace": self._workspace}))
+        try:
+            await ws.send(json.dumps({"type": "ready", "workspace": self._workspace}))
 
-        async for raw in ws:
-            try:
-                request = json.loads(raw)
-            except json.JSONDecodeError as exc:
-                logger.warning("Invalid JSON: %s", exc)
-                continue
+            async for raw in ws:
+                try:
+                    request = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    logger.warning("Invalid JSON: %s", exc)
+                    continue
 
-            method = request.get("method")
-            params = request.get("params", {})
-            request_id = request.get("id")
-            if method == "prompt":
-                text = params.get("text", "")
-                session_id = params.get("sessionId", "")
-                logger.info("← prompt (session=%s, text=%.80s)", session_id, text)
-                if self._current_task and not self._current_task.done():
-                    self._current_task.cancel()
-                self._current_task = asyncio.create_task(self._handle_prompt(text, session_id))
-            elif method == "cancel":
-                if self._current_task and not self._current_task.done():
-                    self._current_task.cancel()
-            elif method == "listSessions":
-                try:
-                    sessions = list_sessions()
-                    self._send_rpc_response(request_id, [_session_info_to_dict(s) for s in sessions])
-                except Exception as exc:
-                    logger.exception("listSessions failed")
-                    self._send_rpc_error(request_id, str(exc))
-            elif method == "createSession":
-                try:
-                    title = params.get("title", "")
-                    model = params.get("model", "")
-                    session = create_session(title=title, model=model)
-                    save_session(session)
-                    self._send_rpc_response(request_id, _session_data_to_dict(session))
-                except Exception as exc:
-                    logger.exception("createSession failed")
-                    self._send_rpc_error(request_id, str(exc))
-            elif method == "loadSession":
-                try:
+                method = request.get("method")
+                params = request.get("params", {})
+                request_id = request.get("id")
+                if method == "prompt":
+                    text = params.get("text", "")
                     session_id = params.get("sessionId", "")
-                    session = load_session(session_id)
-                    if session is None:
-                        self._send_rpc_error(request_id, f"Session not found: {session_id}")
-                    else:
+                    logger.info("← prompt (session=%s, text=%.80s)", session_id, text)
+                    if self._current_task and not self._current_task.done():
+                        self._current_task.cancel()
+                    self._current_task = asyncio.create_task(self._handle_prompt(text, session_id))
+                elif method == "cancel":
+                    if self._current_task and not self._current_task.done():
+                        self._current_task.cancel()
+                elif method == "listSessions":
+                    try:
+                        sessions = list_sessions()
+                        self._send_rpc_response(request_id, [_session_info_to_dict(s) for s in sessions])
+                    except Exception as exc:
+                        logger.exception("listSessions failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "createSession":
+                    try:
+                        title = params.get("title", "")
+                        model = params.get("model", "")
+                        session = create_session(title=title, model=model)
+                        save_session(session)
                         self._send_rpc_response(request_id, _session_data_to_dict(session))
-                except Exception as exc:
-                    logger.exception("loadSession failed")
-                    self._send_rpc_error(request_id, str(exc))
-            elif method == "deleteSession":
-                try:
-                    session_id = params.get("sessionId", "")
-                    ok = delete_session(session_id)
-                    self._send_rpc_response(request_id, {"ok": ok})
-                except Exception as exc:
-                    logger.exception("deleteSession failed")
-                    self._send_rpc_error(request_id, str(exc))
-            elif method == "updateSession":
-                try:
-                    session_id = params.get("sessionId", "")
-                    title = params.get("title")
-                    model = params.get("model")
-                    session = update_session(session_id, title=title, model=model)
-                    if session is None:
-                        self._send_rpc_error(request_id, f"Session not found: {session_id}")
+                    except Exception as exc:
+                        logger.exception("createSession failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "loadSession":
+                    try:
+                        session_id = params.get("sessionId", "")
+                        session = load_session(session_id)
+                        if session is None:
+                            self._send_rpc_error(request_id, f"Session not found: {session_id}")
+                        else:
+                            self._send_rpc_response(request_id, _session_data_to_dict(session))
+                    except Exception as exc:
+                        logger.exception("loadSession failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "deleteSession":
+                    try:
+                        session_id = params.get("sessionId", "")
+                        ok = delete_session(session_id)
+                        self._send_rpc_response(request_id, {"ok": ok})
+                    except Exception as exc:
+                        logger.exception("deleteSession failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "updateSession":
+                    try:
+                        session_id = params.get("sessionId", "")
+                        title = params.get("title")
+                        model = params.get("model")
+                        session = update_session(session_id, title=title, model=model)
+                        if session is None:
+                            self._send_rpc_error(request_id, f"Session not found: {session_id}")
+                        else:
+                            self._send_rpc_response(request_id, _session_data_to_dict(session))
+                    except Exception as exc:
+                        logger.exception("updateSession failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "getSettings":
+                    try:
+                        s = load_settings()
+                        self._send_rpc_response(
+                            request_id,
+                            {
+                                "primaryModel": s.primary_model,
+                                "providers": s.providers,
+                                "max_turns": s.max_turns,
+                            },
+                        )
+                    except Exception as exc:
+                        logger.exception("getSettings failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "updateSettings":
+                    try:
+                        s = load_settings()
+                        if "primaryModel" in params:
+                            s.primary_model = params["primaryModel"]
+                        if "selectedModel" in params:
+                            s.primary_model = params["selectedModel"]
+                        if "providers" in params:
+                            s.providers = params["providers"]
+                        if "max_turns" in params:
+                            s.max_turns = params["max_turns"]
+                        save_settings(s)
+                        self._send_rpc_response(
+                            request_id,
+                            {
+                                "primaryModel": s.primary_model,
+                                "providers": s.providers,
+                                "max_turns": s.max_turns,
+                            },
+                        )
+                    except Exception as exc:
+                        logger.exception("updateSettings failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "approval_response":
+                    call_id = params.get("callId", "")
+                    approved = bool(params.get("approved", False))
+                    if call_id in self._pending_approvals:
+                        self._current_task = asyncio.create_task(self._resume_approval(call_id, approved))
                     else:
-                        self._send_rpc_response(request_id, _session_data_to_dict(session))
-                except Exception as exc:
-                    logger.exception("updateSession failed")
-                    self._send_rpc_error(request_id, str(exc))
-            elif method == "getSettings":
-                try:
-                    s = load_settings()
-                    self._send_rpc_response(
-                        request_id,
-                        {
-                            "primaryModel": s.primary_model,
-                            "providers": s.providers,
-                            "max_turns": s.max_turns,
-                        },
-                    )
-                except Exception as exc:
-                    logger.exception("getSettings failed")
-                    self._send_rpc_error(request_id, str(exc))
-            elif method == "updateSettings":
-                try:
-                    s = load_settings()
-                    if "primaryModel" in params:
-                        s.primary_model = params["primaryModel"]
-                    if "selectedModel" in params:
-                        s.primary_model = params["selectedModel"]
-                    if "providers" in params:
-                        s.providers = params["providers"]
-                    if "max_turns" in params:
-                        s.max_turns = params["max_turns"]
-                    save_settings(s)
-                    self._send_rpc_response(
-                        request_id,
-                        {
-                            "primaryModel": s.primary_model,
-                            "providers": s.providers,
-                            "max_turns": s.max_turns,
-                        },
-                    )
-                except Exception as exc:
-                    logger.exception("updateSettings failed")
-                    self._send_rpc_error(request_id, str(exc))
-            elif method == "approval_response":
-                call_id = params.get("callId", "")
-                approved = bool(params.get("approved", False))
-                if call_id in self._pending_approvals:
-                    self._current_task = asyncio.create_task(self._resume_approval(call_id, approved))
-                else:
-                    self._send_rpc_error(request_id, f"No pending approval: {call_id}")
-
-        self._ws = None
+                        self._send_rpc_error(request_id, f"No pending approval: {call_id}")
+        finally:
+            self._connections.discard(ws)
+            if self._ws is ws:
+                self._ws = None
 
     async def _handle_prompt(self, text: str, session_id: str = "") -> None:
         from agent_framework._types import Content, Message
