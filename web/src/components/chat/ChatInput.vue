@@ -7,11 +7,13 @@ import type { ProviderConfig, Settings } from '@/types/session'
 
 const props = defineProps<{
   disabled?: boolean
+  model?: string
 }>()
 
 const emit = defineEmits<{
   send: [text: string]
   stop: []
+  'update:model': [value: string]
 }>()
 
 const chatStore = useChatStore()
@@ -55,16 +57,19 @@ async function loadSettings() {
   }
 }
 
+const effectiveModel = computed(() => props.model || settings.value?.primaryModel || '')
+
 async function handleModelChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   if (!value) return
+  emit('update:model', value)
   try {
-    await gatewayService.call<Settings>('updateSettings', { selectedModel: value })
+    await gatewayService.call<Settings>('updateSettings', { primaryModel: value })
     if (settings.value) {
-      settings.value.selectedModel = value
+      settings.value.primaryModel = value
     }
   } catch (err) {
-    console.error('Failed to update model', err)
+    console.error('Failed to update primary model', err)
   }
 }
 
@@ -158,7 +163,7 @@ onUnmounted(() => {
       <div class="flex items-center justify-between mt-2 px-1">
         <div v-if="settings" class="relative">
           <select
-            :value="settings.selectedModel"
+            :value="effectiveModel"
             class="appearance-none pl-2 pr-6 py-1 text-xs rounded-lg border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)] outline-none focus:border-[var(--text-subtle)]"
             @change="handleModelChange"
           >

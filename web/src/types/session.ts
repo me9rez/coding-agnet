@@ -1,17 +1,45 @@
 export interface SessionInfo {
   id: string
   title: string
+  model: string
+  modelProvider: string
   createdAt: string
   updatedAt: string
   messageCount: number
+  status: string
+  sessionStartedAt: string
+  lastInteractionAt: string
+  startedAt: string
+  endedAt: string
+  runtimeMs: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cacheReadTokens: number
+  reasoningTokens: number
+  estimatedCostUsd: number
 }
 
 export interface SessionData {
   id: string
   title: string
+  model: string
+  modelProvider: string
   createdAt: string
   updatedAt: string
   messages: Message[]
+  status: string
+  sessionStartedAt: string
+  lastInteractionAt: string
+  startedAt: string
+  endedAt: string
+  runtimeMs: number
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cacheReadTokens: number
+  reasoningTokens: number
+  estimatedCostUsd: number
 }
 
 export interface ModelConfig {
@@ -28,11 +56,12 @@ export interface ProviderConfig {
   api?: string
   baseUrl?: string
   apiKey?: string
+  enabled?: boolean
   models: ModelConfig[]
 }
 
 export interface Settings {
-  selectedModel: string
+  primaryModel: string
   providers: Record<string, ProviderConfig>
   max_turns: number
 }
@@ -58,12 +87,18 @@ export interface FunctionResultContent {
   result: string
 }
 
-export type MessageContent = TextContent | FunctionCallContent | FunctionResultContent
+export interface UsageContent {
+  type: 'usage'
+  usage_details: Record<string, unknown>
+}
+
+export type MessageContent = TextContent | FunctionCallContent | FunctionResultContent | UsageContent
 
 export interface Message {
   role: MessageRole
   contents: MessageContent[]
   additional_properties?: Record<string, unknown>
+  usage?: Record<string, unknown>
 }
 
 export interface UiMessage {
@@ -71,6 +106,7 @@ export interface UiMessage {
   role: 'user' | 'assistant' | 'tool'
   content: string
   timestamp: number
+  loading?: boolean
   thinking?: string
   toolCall?: {
     callId: string

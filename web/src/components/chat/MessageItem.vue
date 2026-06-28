@@ -36,6 +36,21 @@ const renderedContent = computed(() => renderMarkdown(props.message.content))
         <ToolCallBlock :message="message" />
       </div>
 
+      <div v-else-if="message.loading && !message.content.trim() && !message.thinking" class="space-y-2">
+        <div class="flex items-center gap-2 text-xs text-[var(--text-subtle)]">
+          <span class="font-medium text-[var(--text)]">Coding Agent</span>
+          <span>·</span>
+          <span>助手</span>
+        </div>
+        <div class="px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow)]">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-[var(--text-subtle)] animate-bounce" style="animation-delay: 0ms" />
+            <span class="w-2 h-2 rounded-full bg-[var(--text-subtle)] animate-bounce" style="animation-delay: 150ms" />
+            <span class="w-2 h-2 rounded-full bg-[var(--text-subtle)] animate-bounce" style="animation-delay: 300ms" />
+          </div>
+        </div>
+      </div>
+
       <div v-else-if="message.thinking || message.content.trim()" class="space-y-2">
         <div class="flex items-center gap-2 text-xs text-[var(--text-subtle)]">
           <span class="font-medium text-[var(--text)]">Coding Agent</span>

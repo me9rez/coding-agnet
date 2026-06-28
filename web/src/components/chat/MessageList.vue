@@ -33,6 +33,7 @@ function sizeDependencies(message: UiMessage) {
   return [
     message.content,
     message.thinking,
+    message.loading,
     message.toolExecution?.output,
     message.toolCall?.arguments,
   ]

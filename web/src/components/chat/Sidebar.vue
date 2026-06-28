@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { Clock, Folder, Loader2, Plus, Settings, Zap } from '@lucide/vue'
+import {
+  Clock,
+  Folder,
+  HelpCircle,
+  Loader2,
+  Plus,
+  Settings,
+  Upload,
+  User,
+  Wrench,
+  Zap,
+} from '@lucide/vue'
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import { gatewayService } from '@/services/gateway'
 import { useSessionsStore } from '@/stores/sessions'
 
 const sessionsStore = useSessionsStore()
-
-defineEmits<{
-  (e: 'open-settings'): void
-}>()
 
 let unsubscribe: (() => void) | null = null
 
@@ -139,13 +147,9 @@ function formatTime(iso: string) {
 
 <template>
   <aside class="h-full flex flex-col bg-[var(--bg-page)]">
-    <div class="h-14 flex items-center px-5 border-b border-[var(--border)]">
-      <span class="text-sm font-medium">Coding Agent</span>
-    </div>
-
     <div class="p-3">
       <button
-        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--text)] text-[var(--bg-card)] hover:opacity-90 transition shadow-[var(--shadow)] disabled:opacity-60"
+        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm font-medium hover:bg-[var(--bg-muted)] transition shadow-[var(--shadow)] disabled:opacity-60"
         :disabled="creating"
         @click="handleNewChat"
       >
@@ -157,14 +161,24 @@ function formatTime(iso: string) {
 
     <nav class="px-3 space-y-1">
       <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
+        <Wrench class="w-4 h-4" />
+        <span>工具箱</span>
+      </a>
+      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
         <Zap class="w-4 h-4" />
         <span>自动化</span>
       </a>
+    </nav>
+
+    <div class="px-3 py-2">
+      <div class="px-2 py-2 text-xs font-medium text-[var(--text-subtle)]">
+        项目
+      </div>
       <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
         <Folder class="w-4 h-4" />
-        <span>项目</span>
+        <span>cowork</span>
       </a>
-    </nav>
+    </div>
 
     <div class="flex-1 overflow-y-auto px-3 py-2">
       <div class="px-2 py-2 text-xs font-medium text-[var(--text-subtle)] flex items-center gap-1">
@@ -231,14 +245,26 @@ function formatTime(iso: string) {
       </ul>
     </div>
 
-    <div class="p-3 border-t border-[var(--border)]">
-      <button
-        class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition"
-        @click="$emit('open-settings')"
-      >
-        <Settings class="w-4 h-4" />
-        <span>设置</span>
+    <div class="p-3 border-t border-[var(--border)] flex items-center justify-between">
+      <button class="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
+        <User class="w-4 h-4" />
+        <span>我</span>
       </button>
+      <div class="flex items-center gap-1">
+        <button class="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition" title="上传">
+          <Upload class="w-4 h-4" />
+        </button>
+        <RouterLink
+          to="/settings"
+          class="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition"
+          title="设置"
+        >
+          <Settings class="w-4 h-4" />
+        </RouterLink>
+        <button class="p-2 rounded-lg text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition" title="帮助">
+          <HelpCircle class="w-4 h-4" />
+        </button>
+      </div>
     </div>
 
     <Teleport to="body">

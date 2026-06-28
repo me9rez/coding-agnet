@@ -60,11 +60,13 @@ export const useChatStore = defineStore('chat', () => {
 
   function appendTextDelta(delta: string) {
     const msg = ensureAssistantMessage()
+    msg.loading = false
     msg.content += delta
   }
 
   function appendThinkingDelta(delta: string) {
     const msg = ensureAssistantMessage()
+    msg.loading = false
     msg.thinking = (msg.thinking ?? '') + delta
   }
 
@@ -124,6 +126,13 @@ export const useChatStore = defineStore('chat', () => {
     addUserMessage(text)
     runState.value = 'running'
     error.value = null
+    messages.value.push({
+      id: generateId('msg'),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      loading: true,
+    })
     gatewayService.sendPrompt(text, sessionId)
   }
 
@@ -158,11 +167,19 @@ export const useChatStore = defineStore('chat', () => {
       }
     })
     gatewayService.on('done', () => {
+      const last = messages.value[messages.value.length - 1]
+      if (last && last.role === 'assistant') {
+        last.loading = false
+      }
       runState.value = 'idle'
     })
     gatewayService.on('error', (event) => {
       if (isErrorEvent(event)) {
         if (!event.recoverable) {
+          const last = messages.value[messages.value.length - 1]
+          if (last && last.role === 'assistant') {
+            last.loading = false
+          }
           runState.value = 'idle'
         }
         error.value = event.message
