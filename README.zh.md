@@ -55,7 +55,7 @@ uv tool install coding-agent
 coding-agent --web
 ```
 
-打开 [http://127.0.0.1:8080](http://127.0.0.1:8080)，开始对话。
+打开 [http://127.0.0.1:8766](http://127.0.0.1:8766)，开始对话。
 
 ## 内置工具
 

@@ -55,7 +55,7 @@ Create `~/.coding-agent/settings.json`:
 coding-agent --web
 ```
 
-Open [http://127.0.0.1:8080](http://127.0.0.1:8080) and start typing.
+Open [http://127.0.0.1:8766](http://127.0.0.1:8766) and start typing.
 
 ## Built-in tools
 
