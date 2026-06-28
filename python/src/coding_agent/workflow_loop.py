@@ -33,7 +33,6 @@ from coding_agent.events import (
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolApprovalRequestEvent,
-    ToolCallStartEvent,
     TurnEndEvent,
     UsageEvent,
 )
@@ -315,7 +314,10 @@ async def _run_workflow(
                 name = getattr(function_call, "name", "") or ""
                 arguments = getattr(function_call, "arguments", "{}") or "{}"
 
-                emit(ToolCallStartEvent(call_id=call_id, name=name, arguments=arguments))
+                # Do not emit ToolCallStartEvent here: the framework's
+                # FunctionInvocationLayer will emit it on resume after approval.
+                # Only emit the approval request so the UI can show the pending
+                # tool details without creating a duplicate tool card.
                 emit(ToolApprovalRequestEvent(call_id=call_id, name=name, arguments=arguments))
 
                 assistant_message = next(

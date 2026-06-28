@@ -40,6 +40,18 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function addPendingApproval(approval: PendingApproval) {
+    // The model paused for tool approval instead of streaming text, so discard
+    // the empty loading assistant bubble created when the run started.
+    const last = messages.value[messages.value.length - 1]
+    if (
+      last &&
+      last.role === 'assistant' &&
+      last.loading &&
+      !last.content.trim() &&
+      !last.thinking?.trim()
+    ) {
+      messages.value.pop()
+    }
     pendingApprovals.value.push(approval)
     runState.value = 'waiting_approval'
   }
@@ -97,6 +109,18 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function startToolCall(callId: string, name: string, args: string) {
+    // Discard the empty loading assistant bubble that was created when the run
+    // started, since the model decided to call a tool instead of streaming text.
+    const last = messages.value[messages.value.length - 1]
+    if (
+      last &&
+      last.role === 'assistant' &&
+      last.loading &&
+      !last.content.trim() &&
+      !last.thinking?.trim()
+    ) {
+      messages.value.pop()
+    }
     messages.value.push({
       id: generateId('tool'),
       role: 'tool',
