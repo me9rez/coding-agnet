@@ -158,15 +158,18 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function endToolExecution(callId: string, name: string, ok: boolean, exitCode: number) {
+  function endToolExecution(callId: string, name: string, ok: boolean, exitCode: number, result?: string) {
     const tool = findToolMessage(callId)
     if (tool) {
       if (!tool.toolExecution) {
-        tool.toolExecution = { callId, name, output: '', ok, exitCode, finished: true }
+        tool.toolExecution = { callId, name, output: result || '', ok, exitCode, finished: true }
       } else {
         tool.toolExecution.ok = ok
         tool.toolExecution.exitCode = exitCode
         tool.toolExecution.finished = true
+        if (result !== undefined) {
+          tool.toolExecution.output = result
+        }
       }
     }
   }
@@ -209,7 +212,8 @@ export const useChatStore = defineStore('chat', () => {
       if (isToolExecutionDeltaEvent(event)) appendToolExecutionDelta(event.callId, event.line)
     })
     gatewayService.on('tool_execution_end', (event) => {
-      if (isToolExecutionEndEvent(event)) endToolExecution(event.callId, event.name, event.ok, event.exitCode)
+      if (isToolExecutionEndEvent(event))
+        endToolExecution(event.callId, event.name, event.ok, event.exitCode, event.result)
     })
     gatewayService.on('turn_end', (event) => {
       if (isTurnEndEvent(event) && event.reason === 'complete') {
@@ -313,6 +317,20 @@ export function convertBackendMessages(msgs: BackendMessage[]): UiMessage[] {
       : typeof msg.additional_properties?.thinking === 'string'
         ? msg.additional_properties.thinking
         : undefined
+
+    // When an assistant message has thinking but no text content, pre-create
+    // the textSegment before the content loop. Otherwise the tool content
+    // handler (function_call / function_result) calls flushText() before the
+    // thinking bubble is created, pushing the thinking block *after* the tool
+    // message — mismatching the live streaming order (think → act → observe).
+    // emittedThinking prevents the end-of-message check from double-emitting.
+    let emittedThinking = false
+    const hasTextContent = msg.contents.some(isTextContent)
+    if (thinking && !textSegment && msg.role === 'assistant' && !hasTextContent) {
+      textSegment = { role: msg.role, content: '', thinking }
+      emittedThinking = true
+    }
+
     for (const content of msg.contents) {
       if (isTextContent(content)) {
         if (!textSegment) {
@@ -391,7 +409,7 @@ export function convertBackendMessages(msgs: BackendMessage[]): UiMessage[] {
 
     // Ensure a message with only thinking (no text/tool) still surfaces the thinking block,
     // but do not create empty user/tool bubbles.
-    if (thinking && !textSegment && msg.role === 'assistant') {
+    if (!emittedThinking && thinking && !textSegment && msg.role === 'assistant') {
       textSegment = { role: msg.role, content: '', thinking }
     }
     flushText()

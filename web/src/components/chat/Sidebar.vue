@@ -12,11 +12,12 @@ import {
   Zap,
 } from '@lucide/vue'
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { gatewayService } from '@/services/gateway'
 import { useSessionsStore } from '@/stores/sessions'
 
 const sessionsStore = useSessionsStore()
+const router = useRouter()
 
 let unsubscribe: (() => void) | null = null
 
@@ -54,15 +55,13 @@ async function handleNewChat() {
   if (creating.value) return
   creating.value = true
   try {
-    await sessionsStore.createSession('新对话')
+    const session = await sessionsStore.createSession('新对话')
+    if (session) {
+      router.push({ name: 'chat-session', params: { sessionId: session.id } })
+    }
   } finally {
     creating.value = false
   }
-}
-
-function selectSession(id: string) {
-  if (editingId.value === id) return
-  sessionsStore.selectSession(id)
 }
 
 function openContextMenu(sessionId: string, event: MouseEvent) {
@@ -205,42 +204,45 @@ function formatTime(iso: string) {
         <li
           v-for="session in sessionsStore.sessions"
           :key="session.id"
-          class="group relative flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition"
-          :class="{
-            'bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow)]': sessionsStore.currentSessionId === session.id,
-            'hover:bg-[var(--bg-muted)]': sessionsStore.currentSessionId !== session.id,
-          }"
-          @click="selectSession(session.id)"
-          @contextmenu="openContextMenu(session.id, $event)"
         >
-          <div
-            v-if="sessionsStore.currentSessionId === session.id"
-            class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-full bg-[var(--text)]"
-          />
-          <div class="min-w-0 flex-1 pl-1">
-            <div v-if="editingId === session.id" class="w-full">
-              <input
-                ref="renameInputRef"
-                v-model="editingTitle"
-                type="text"
-                class="w-full text-sm px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-card)] outline-none focus:border-[var(--text-muted)]"
-                @blur="commitRename(session.id)"
-                @keydown="handleRenameKeydown(session.id, $event)"
-                @click.stop
-              >
+          <RouterLink
+            :to="{ name: 'chat-session', params: { sessionId: session.id } }"
+            class="group relative flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition"
+            :class="{
+              'bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow)]': sessionsStore.currentSessionId === session.id,
+              'hover:bg-[var(--bg-muted)]': sessionsStore.currentSessionId !== session.id,
+            }"
+            @contextmenu="openContextMenu(session.id, $event)"
+          >
+            <div
+              v-if="sessionsStore.currentSessionId === session.id"
+              class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-full bg-[var(--text)]"
+            />
+            <div class="min-w-0 flex-1 pl-1">
+              <div v-if="editingId === session.id" class="w-full">
+                <input
+                  ref="renameInputRef"
+                  v-model="editingTitle"
+                  type="text"
+                  class="w-full text-sm px-2 py-1 rounded border border-[var(--border)] bg-[var(--bg-card)] outline-none focus:border-[var(--text-muted)]"
+                  @blur="commitRename(session.id)"
+                  @keydown="handleRenameKeydown(session.id, $event)"
+                  @click.stop
+                >
+              </div>
+              <template v-else>
+                <div
+                  class="truncate text-sm font-medium"
+                  @dblclick="startRename(session, $event)"
+                >
+                  {{ session.title || '未命名会话' }}
+                </div>
+                <div class="text-xs text-[var(--text-subtle)]">
+                  {{ formatTime(session.updatedAt) }}
+                </div>
+              </template>
             </div>
-            <template v-else>
-              <div
-                class="truncate text-sm font-medium"
-                @dblclick="startRename(session, $event)"
-              >
-                {{ session.title || '未命名会话' }}
-              </div>
-              <div class="text-xs text-[var(--text-subtle)]">
-                {{ formatTime(session.updatedAt) }}
-              </div>
-            </template>
-          </div>
+          </RouterLink>
         </li>
       </ul>
     </div>

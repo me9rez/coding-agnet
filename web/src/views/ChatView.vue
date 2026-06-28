@@ -1,60 +1,38 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
-import ApprovalPanel from '@/components/ApprovalPanel.vue'
+import { computed } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
 import ChatHeader from '@/components/chat/ChatHeader.vue'
-import ChatInput from '@/components/chat/ChatInput.vue'
 import ContextPanel from '@/components/chat/ContextPanel.vue'
-import EmptyState from '@/components/chat/EmptyState.vue'
-import MessageList from '@/components/chat/MessageList.vue'
 import Sidebar from '@/components/chat/Sidebar.vue'
-import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
 
 const sessionsStore = useSessionsStore()
-const chatStore = useChatStore()
-const chatInputRef = ref<{ setText: (text: string) => void } | null>(null)
+const route = useRoute()
 
-const currentSessionModel = computed(() => {
-  if (!sessionsStore.currentSessionId) return ''
-  const session = sessionsStore.sessions.find((s) => s.id === sessionsStore.currentSessionId)
-  return session?.model || ''
+// Drive the active session from the route so the sidebar highlight and the
+// chat input both agree with whatever URL the user is on.
+const activeSessionId = computed<string | null>(() => {
+  const id = route.params.sessionId
+  if (typeof id === 'string' && id.length > 0) {
+    if (sessionsStore.currentSessionId !== id) {
+      sessionsStore.selectSession(id)
+    }
+    return id
+  }
+  if (sessionsStore.currentSessionId) {
+    sessionsStore.clearCurrentSession()
+  }
+  return null
 })
 
-async function handleUseSuggestion(text: string, model: string) {
-  const session = await sessionsStore.createSession(text, model)
-  if (session) {
-    await nextTick()
-    chatInputRef.value?.setText(text)
+// Each session gets a stable, unique cache key so keep-alive can hold a
+// separate instance per session. The home view uses the literal 'home' key.
+const keepAliveKey = computed(() => {
+  if (activeSessionId.value) {
+    return `session:${activeSessionId.value}`
   }
-}
-
-watch(
-  () => sessionsStore.currentSessionId,
-  async (sessionId) => {
-    if (sessionId) {
-      const session = await sessionsStore.loadSession(sessionId)
-      if (session) {
-        chatStore.loadSession(session)
-      }
-    } else {
-      chatStore.reset()
-    }
-  },
-)
-
-function handleSend(text: string) {
-  chatStore.sendMessage(text, sessionsStore.currentSessionId ?? undefined)
-}
-
-async function handleModelChange(model: string) {
-  if (sessionsStore.currentSessionId) {
-    await sessionsStore.updateSessionModel(sessionsStore.currentSessionId, model)
-  }
-}
-
-function handleStop() {
-  chatStore.stop()
-}
+  return 'home'
+})
 </script>
 
 <template>
@@ -63,26 +41,11 @@ function handleStop() {
 
     <main class="flex-1 flex flex-col min-w-0 bg-[var(--bg-page)]">
       <ChatHeader />
-      <MessageList
-        v-if="sessionsStore.currentSessionId || chatStore.messages.length > 0"
-        class="flex-1 overflow-y-auto"
-      />
-      <EmptyState v-else @send="handleUseSuggestion" @use-suggestion="handleUseSuggestion" />
-      <div
-        v-if="sessionsStore.currentSessionId || chatStore.messages.length > 0"
-        class="px-4 pb-2"
-      >
-        <ApprovalPanel />
-      </div>
-      <ChatInput
-        v-if="sessionsStore.currentSessionId || chatStore.messages.length > 0"
-        ref="chatInputRef"
-        :model="currentSessionModel"
-        :disabled="chatStore.isRunning"
-        @send="handleSend"
-        @stop="handleStop"
-        @update:model="handleModelChange"
-      />
+      <RouterView v-slot="{ Component }">
+        <keep-alive :max="10">
+          <component :is="Component" :key="keepAliveKey" />
+        </keep-alive>
+      </RouterView>
     </main>
 
     <ContextPanel />

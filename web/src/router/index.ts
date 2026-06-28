@@ -1,14 +1,30 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import ChatView from '../views/ChatView.vue'
+import ChatSessionView from '../views/ChatSessionView.vue'
+import EmptyStateView from '../views/EmptyStateView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/',
-      name: 'chat',
       component: ChatView,
+      children: [
+        {
+          path: '',
+          name: 'chat-home',
+          component: EmptyStateView,
+          meta: { keepAliveKey: 'home' },
+        },
+        {
+          path: 'chat/:sessionId',
+          name: 'chat-session',
+          component: ChatSessionView,
+          props: true,
+          meta: { keepAliveKey: 'session' },
+        },
+      ],
     },
     {
       path: '/settings',

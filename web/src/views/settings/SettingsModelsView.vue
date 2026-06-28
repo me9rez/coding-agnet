@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, ChevronDown, Globe, ImagePlus, Plus } from '@lucide/vue'
+import { AlertCircle, ChevronDown, Globe, ImagePlus, Plus, Trash2 } from '@lucide/vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import type { ProviderConfig } from '@/types/session'
@@ -180,7 +180,7 @@ watch(
           class="flex items-center gap-2 text-sm text-red-600 hover:text-red-700 transition"
           @click="showClearConfirm = true"
         >
-          <span class="i-carbon-trash-can w-4 h-4" />
+          <Trash2 class="w-4 h-4" />
           <span>清除所有已保存密钥</span>
         </button>
       </div>

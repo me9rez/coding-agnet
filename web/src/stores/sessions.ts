@@ -90,6 +90,10 @@ export const useSessionsStore = defineStore('sessions', () => {
     currentSessionId.value = sessionId
   }
 
+  function clearCurrentSession() {
+    currentSessionId.value = null
+  }
+
   return {
     sessions,
     currentSessionId,
@@ -102,5 +106,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     updateSessionModel,
     deleteSession,
     selectSession,
+    clearCurrentSession,
   }
 })
