@@ -6,8 +6,8 @@ Each maps to a JSON-RPC event emitted from the gateway to the TUI.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 # ── Fine-grained streaming events ──────────────────────────────────
 
@@ -96,6 +96,19 @@ class ErrorEvent:
     recoverable: bool = False
 
 
+@dataclass
+class UsageEvent:
+    """Token usage details returned by the LLM API for one turn."""
+
+    type: Literal["usage"] = "usage"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cache_read_tokens: int = 0
+    reasoning_tokens: int = 0
+    details: dict[str, Any] = field(default_factory=dict)
+
+
 # ── Union type for all events ──────────────────────────────────────
 
 
@@ -109,4 +122,5 @@ AgentEvent = (
     | TurnEndEvent
     | DoneEvent
     | ErrorEvent
+    | UsageEvent
 )

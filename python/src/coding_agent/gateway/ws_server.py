@@ -26,15 +26,19 @@ from coding_agent.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     TurnEndEvent,
+    UsageEvent,
 )
 from coding_agent.session import (
     create_session,
     delete_session,
+    end_session_run,
     list_sessions,
     load_session,
     save_session,
+    start_session_run,
+    update_session,
 )
-from coding_agent.settings import Settings, _split_selected_model, selected_model_config, selected_thinking_level
+from coding_agent.settings import Settings, _split_selected_model, build_client, model_config, thinking_level
 from coding_agent.settings import load as load_settings
 from coding_agent.settings import save as save_settings
 from coding_agent.thinking import thinking_options_for_model
@@ -49,6 +53,20 @@ def _session_info_to_dict(info: Any) -> dict[str, Any]:
         "updatedAt": info.updated_at,
         "messageCount": info.message_count,
         "title": info.title,
+        "model": info.model,
+        "modelProvider": info.model_provider,
+        "status": info.status,
+        "sessionStartedAt": info.session_started_at,
+        "lastInteractionAt": info.last_interaction_at,
+        "startedAt": info.started_at,
+        "endedAt": info.ended_at,
+        "runtimeMs": info.runtime_ms,
+        "inputTokens": info.input_tokens,
+        "outputTokens": info.output_tokens,
+        "totalTokens": info.total_tokens,
+        "cacheReadTokens": info.cache_read_tokens,
+        "reasoningTokens": info.reasoning_tokens,
+        "estimatedCostUsd": info.estimated_cost_usd,
     }
 
 
@@ -56,9 +74,23 @@ def _session_data_to_dict(session: Any) -> dict[str, Any]:
     return {
         "id": session.id,
         "title": session.title,
+        "model": session.model,
+        "modelProvider": session.model_provider,
         "createdAt": session.created_at,
         "updatedAt": session.updated_at,
         "messages": session.messages,
+        "status": session.status,
+        "sessionStartedAt": session.session_started_at,
+        "lastInteractionAt": session.last_interaction_at,
+        "startedAt": session.started_at,
+        "endedAt": session.ended_at,
+        "runtimeMs": session.runtime_ms,
+        "inputTokens": session.input_tokens,
+        "outputTokens": session.output_tokens,
+        "totalTokens": session.total_tokens,
+        "cacheReadTokens": session.cache_read_tokens,
+        "reasoningTokens": session.reasoning_tokens,
+        "estimatedCostUsd": session.estimated_cost_usd,
     }
 
 
@@ -86,6 +118,19 @@ def _serialize_event(event: AgentEvent) -> dict[str, Any]:
             }
         case TurnEndEvent(reason=r):
             return {"type": "turn_end", "reason": r}
+        case UsageEvent(
+            input_tokens=i, output_tokens=o, total_tokens=t,
+            cache_read_tokens=c, reasoning_tokens=r, details=d,
+        ):
+            return {
+                "type": "usage",
+                "inputTokens": i,
+                "outputTokens": o,
+                "totalTokens": t,
+                "cacheReadTokens": c,
+                "reasoningTokens": r,
+                "details": d,
+            }
         case DoneEvent():
             return {"type": "done"}
         case ErrorEvent(message=m, recoverable=r):
@@ -128,14 +173,12 @@ class WsGatewayServer:
 
     def __init__(
         self,
-        client: Any,
         tools: list[Any] | None = None,
-        settings: object | None = None,
+        settings: Settings | None = None,
         *,
         host: str = "127.0.0.1",
         port: int = 8765,
     ) -> None:
-        self._client = client
         self._tools = tools or []
         self._settings = settings
         self._host = host
@@ -144,7 +187,15 @@ class WsGatewayServer:
         self._session: Any = None
         self._ws: ServerConnection | None = None
         self._emit_tasks: list[asyncio.Task[None]] = []
+        self._clients: dict[str, Any] = {}
         self._workspace = self._detect_workspace()
+
+    def _client_for(self, model: str) -> Any:
+        if self._settings is None:
+            raise RuntimeError("Settings not available")
+        if model not in self._clients:
+            self._clients[model] = build_client(self._settings, model)
+        return self._clients[model]
 
     def _detect_workspace(self) -> dict[str, str]:
         from coding_agent.system_prompt import discover_project_context
@@ -224,7 +275,8 @@ class WsGatewayServer:
             elif method == "createSession":
                 try:
                     title = params.get("title", "")
-                    session = create_session(title=title)
+                    model = params.get("model", "")
+                    session = create_session(title=title, model=model)
                     save_session(session)
                     self._send_rpc_response(request_id, _session_data_to_dict(session))
                 except Exception as exc:
@@ -252,13 +304,12 @@ class WsGatewayServer:
             elif method == "updateSession":
                 try:
                     session_id = params.get("sessionId", "")
-                    title = params.get("title", "")
-                    session = load_session(session_id)
+                    title = params.get("title")
+                    model = params.get("model")
+                    session = update_session(session_id, title=title, model=model)
                     if session is None:
                         self._send_rpc_error(request_id, f"Session not found: {session_id}")
                     else:
-                        session.title = title
-                        save_session(session)
                         self._send_rpc_response(request_id, _session_data_to_dict(session))
                 except Exception as exc:
                     logger.exception("updateSession failed")
@@ -269,7 +320,7 @@ class WsGatewayServer:
                     self._send_rpc_response(
                         request_id,
                         {
-                            "selectedModel": s.selected_model,
+                            "primaryModel": s.primary_model,
                             "providers": s.providers,
                             "max_turns": s.max_turns,
                         },
@@ -280,8 +331,10 @@ class WsGatewayServer:
             elif method == "updateSettings":
                 try:
                     s = load_settings()
+                    if "primaryModel" in params:
+                        s.primary_model = params["primaryModel"]
                     if "selectedModel" in params:
-                        s.selected_model = params["selectedModel"]
+                        s.primary_model = params["selectedModel"]
                     if "providers" in params:
                         s.providers = params["providers"]
                     if "max_turns" in params:
@@ -290,7 +343,7 @@ class WsGatewayServer:
                     self._send_rpc_response(
                         request_id,
                         {
-                            "selectedModel": s.selected_model,
+                            "primaryModel": s.primary_model,
                             "providers": s.providers,
                             "max_turns": s.max_turns,
                         },
@@ -313,14 +366,21 @@ class WsGatewayServer:
             discover_project_context,
         )
 
-        # Resolve session
+        # Resolve session and model
+        settings = self._settings if isinstance(self._settings, Settings) else None
+        primary_model = getattr(settings, "primary_model", "") if settings else ""
         existing = load_session(session_id) if session_id else None
         if existing:
             session = existing
         elif self._session is None:
-            session = create_session()
+            session = create_session(model=primary_model)
         else:
             session = self._session
+        self._session = session
+        session_model = session.model or primary_model
+        if not session_id:
+            save_session(session)
+        session = start_session_run(session.id) or session
         self._session = session
 
         # Build messages
@@ -331,19 +391,29 @@ class WsGatewayServer:
         ctx = discover_project_context()
         sys_prompt = build_system_prompt(BuildSystemPromptOptions(project_context=ctx, skills_prompt=skills_prompt))
 
+        error_occurred = False
+
+        def _on_event(event: AgentEvent) -> None:
+            if isinstance(event, UsageEvent):
+                session.input_tokens += event.input_tokens
+                session.output_tokens += event.output_tokens
+                session.total_tokens += event.total_tokens
+                session.cache_read_tokens += event.cache_read_tokens
+                session.reasoning_tokens += event.reasoning_tokens
+            self._emit(event)
+
         try:
-            settings = self._settings
-            selected = getattr(settings, "selected_model", "") if settings else ""
-            provider_id, model_id = _split_selected_model(selected)
-            model_cfg = selected_model_config(settings) if isinstance(settings, Settings) else None
-            max_tok = model_cfg.get("contextWindow") if model_cfg else None
-            thinking_level = selected_thinking_level(settings) if isinstance(settings, Settings) else None
-            options = thinking_options_for_model(thinking_level, provider_id, model_id)
+            provider_id, model_id = _split_selected_model(session_model)
+            cfg = model_config(settings, session_model) if settings else None
+            max_tok = cfg.get("contextWindow") if cfg else None
+            lvl = thinking_level(settings, session_model) if settings else None
+            options = thinking_options_for_model(lvl, provider_id, model_id)
+            client = self._client_for(session_model)
             await run_coding_agent(
-                client=self._client,
+                client=client,
                 messages=messages,  # type: ignore[arg-type]
                 tools=self._tools,
-                on_event=self._emit,
+                on_event=_on_event,
                 system_prompt=sys_prompt,
                 thinking_level=options.get("reasoning_effort") if options else None,
                 compaction_max_tokens=max_tok,
@@ -353,12 +423,15 @@ class WsGatewayServer:
             self._emit(ErrorEvent(message="Agent run cancelled", recoverable=True))
             self._emit(DoneEvent())
         except Exception as exc:
+            error_occurred = True
             logger.exception("Agent loop failed")
             self._emit(ErrorEvent(message=str(exc), recoverable=False))
             self._emit(DoneEvent())
         finally:
             has_sys = messages and hasattr(messages[0], "role") and getattr(messages[0], "role", "") == "system"
             session.messages = [message_to_dict(m) for m in (messages[1:] if has_sys else messages)]
+            session = end_session_run(session.id, error=error_occurred) or session
+            self._session = session
             save_session(session)
 
     async def run_forever(self) -> None:

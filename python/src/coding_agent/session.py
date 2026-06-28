@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,21 @@ class SessionInfo:
     updated_at: str
     message_count: int
     title: str = ""
+    model: str = ""
+    model_provider: str = ""
+    status: str = "idle"
+    session_file: str = ""
+    session_started_at: str = ""
+    last_interaction_at: str = ""
+    started_at: str = ""
+    ended_at: str = ""
+    runtime_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cache_read_tokens: int = 0
+    reasoning_tokens: int = 0
+    estimated_cost_usd: float = 0.0
 
 
 @dataclass
@@ -39,13 +55,28 @@ class SessionData:
     title: str = ""
     created_at: str = ""
     updated_at: str = ""
+    model: str = ""
+    model_provider: str = ""
+    status: str = "idle"
+    session_file: str = ""
+    session_started_at: str = ""
+    last_interaction_at: str = ""
+    started_at: str = ""
+    ended_at: str = ""
+    runtime_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cache_read_tokens: int = 0
+    reasoning_tokens: int = 0
+    estimated_cost_usd: float = 0.0
 
 
 # ── Session store ───────────────────────────────────────────────
 
 
 _SESSIONS_DIR = Path.home() / ".coding-agent" / "sessions"
-_INDEX_FILE = "index.json"
+_INDEX_FILE = "sessions.json"
 
 
 def _session_dir() -> Path:
@@ -71,25 +102,65 @@ def _load_index() -> dict[str, SessionInfo]:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return {sid: SessionInfo(**info) for sid, info in data.items()}
+        return {
+            sid: SessionInfo(
+                id=info.get("id", sid),
+                created_at=info.get("created_at", ""),
+                updated_at=info.get("updated_at", ""),
+                message_count=info.get("message_count", 0),
+                title=info.get("title", ""),
+                model=info.get("model", ""),
+                model_provider=info.get("model_provider", ""),
+                status=info.get("status", "idle"),
+                session_file=info.get("session_file", ""),
+                session_started_at=info.get("session_started_at", ""),
+                last_interaction_at=info.get("last_interaction_at", ""),
+                started_at=info.get("started_at", ""),
+                ended_at=info.get("ended_at", ""),
+                runtime_ms=info.get("runtime_ms", 0),
+                input_tokens=info.get("input_tokens", 0),
+                output_tokens=info.get("output_tokens", 0),
+                total_tokens=info.get("total_tokens", 0),
+                cache_read_tokens=info.get("cache_read_tokens", 0),
+                reasoning_tokens=info.get("reasoning_tokens", 0),
+                estimated_cost_usd=info.get("estimated_cost_usd", 0.0),
+            )
+            for sid, info in data.items()
+        }
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
         logger.warning("Failed to load session index: %s", exc)
         return {}
 
 
+def _info_to_dict(info: SessionInfo) -> dict[str, Any]:
+    return {
+        "id": info.id,
+        "created_at": info.created_at,
+        "updated_at": info.updated_at,
+        "message_count": info.message_count,
+        "title": info.title,
+        "model": info.model,
+        "model_provider": info.model_provider,
+        "status": info.status,
+        "session_file": info.session_file,
+        "session_started_at": info.session_started_at,
+        "last_interaction_at": info.last_interaction_at,
+        "started_at": info.started_at,
+        "ended_at": info.ended_at,
+        "runtime_ms": info.runtime_ms,
+        "input_tokens": info.input_tokens,
+        "output_tokens": info.output_tokens,
+        "total_tokens": info.total_tokens,
+        "cache_read_tokens": info.cache_read_tokens,
+        "reasoning_tokens": info.reasoning_tokens,
+        "estimated_cost_usd": info.estimated_cost_usd,
+    }
+
+
 def _save_index(index: dict[str, SessionInfo]) -> None:
     """Save the session index to disk."""
     _session_dir().mkdir(parents=True, exist_ok=True)
-    data = {
-        sid: {
-            "id": info.id,
-            "created_at": info.created_at,
-            "updated_at": info.updated_at,
-            "message_count": info.message_count,
-            "title": info.title,
-        }
-        for sid, info in index.items()
-    }
+    data = {sid: _info_to_dict(info) for sid, info in index.items()}
     _index_path().write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -100,10 +171,50 @@ def list_sessions() -> list[SessionInfo]:
     return sessions
 
 
-def create_session(title: str = "") -> SessionData:
+def create_session(title: str = "", model: str = "") -> SessionData:
     """Create a new empty session."""
     now = _now()
-    return SessionData(id=uuid.uuid4().hex[:12], title=title, created_at=now, updated_at=now)
+    session_id = uuid.uuid4().hex[:12]
+    provider_id, _ = _split_model(model) if model else ("", "")
+    return SessionData(
+        id=session_id,
+        title=title,
+        model=model,
+        model_provider=provider_id,
+        created_at=now,
+        updated_at=now,
+        session_file=str(_session_path(session_id)),
+        session_started_at=now,
+    )
+
+
+def _split_model(value: str) -> tuple[str, str]:
+    if "/" in value:
+        provider, model = value.split("/", 1)
+        return provider, model
+    return "", value
+
+
+def _aggregate_usage(messages: list[dict]) -> dict[str, int]:
+    """Sum usage_details from all 'usage' content blocks in messages."""
+    total: dict[str, int] = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cache_read_tokens": 0,
+        "reasoning_tokens": 0,
+    }
+    for msg in messages:
+        for c in msg.get("contents", []):
+            if c.get("type") != "usage":
+                continue
+            details = c.get("usage_details") or {}
+            total["input_tokens"] += details.get("input_token_count", 0) or 0
+            total["output_tokens"] += details.get("output_token_count", 0) or 0
+            total["total_tokens"] += details.get("total_token_count", 0) or 0
+            total["cache_read_tokens"] += details.get("cache_read_input_token_count", 0) or 0
+            total["reasoning_tokens"] += details.get("reasoning_output_token_count", 0) or 0
+    return total
 
 
 def save_session(session: SessionData) -> None:
@@ -118,13 +229,34 @@ def save_session(session: SessionData) -> None:
 
     # Update index
     session.updated_at = _now()
+    session.last_interaction_at = session.updated_at
+    usage = _aggregate_usage(session.messages)
     index = _load_index()
+    existing = index.get(session.id)
+    session_started_at = session.session_started_at or (
+        existing.session_started_at if existing else session.created_at
+    )
     index[session.id] = SessionInfo(
         id=session.id,
         created_at=session.created_at,
         updated_at=session.updated_at,
         message_count=len(session.messages),
         title=session.title,
+        model=session.model,
+        model_provider=session.model_provider,
+        status=session.status,
+        session_file=session.session_file or str(path),
+        session_started_at=session_started_at,
+        last_interaction_at=session.last_interaction_at,
+        started_at=session.started_at,
+        ended_at=session.ended_at,
+        runtime_ms=session.runtime_ms,
+        input_tokens=usage["input_tokens"],
+        output_tokens=usage["output_tokens"],
+        total_tokens=usage["total_tokens"],
+        cache_read_tokens=usage["cache_read_tokens"],
+        reasoning_tokens=usage["reasoning_tokens"],
+        estimated_cost_usd=session.estimated_cost_usd,
     )
     _save_index(index)
 
@@ -154,9 +286,102 @@ def load_session(session_id: str) -> SessionData | None:
         id=session_id,
         messages=messages,
         title=info.title,
+        model=info.model,
+        model_provider=info.model_provider,
+        status=info.status,
+        session_file=info.session_file or str(path),
+        session_started_at=info.session_started_at,
+        last_interaction_at=info.last_interaction_at,
+        started_at=info.started_at,
+        ended_at=info.ended_at,
+        runtime_ms=info.runtime_ms,
+        input_tokens=info.input_tokens,
+        output_tokens=info.output_tokens,
+        total_tokens=info.total_tokens,
+        cache_read_tokens=info.cache_read_tokens,
+        reasoning_tokens=info.reasoning_tokens,
+        estimated_cost_usd=info.estimated_cost_usd,
         created_at=info.created_at,
         updated_at=info.updated_at,
     )
+
+
+def update_session(session_id: str, title: str | None = None, model: str | None = None) -> SessionData | None:
+    """Update a session's title and/or model."""
+    index = _load_index()
+    info = index.get(session_id)
+    if info is None:
+        return None
+    if title is not None:
+        info.title = title
+        info.updated_at = _now()
+    if model is not None:
+        info.model = model
+        info.model_provider = _split_model(model)[0]
+        info.updated_at = _now()
+    _save_index(index)
+
+    session = load_session(session_id)
+    if session is None:
+        return None
+    if title is not None:
+        session.title = title
+    if model is not None:
+        session.model = model
+        session.model_provider = _split_model(model)[0]
+    return session
+
+
+def start_session_run(session_id: str) -> SessionData | None:
+    """Mark a session as running and record start time."""
+    index = _load_index()
+    info = index.get(session_id)
+    if info is None:
+        return None
+    now = _now()
+    info.status = "running"
+    info.started_at = now
+    info.ended_at = ""
+    info.runtime_ms = 0
+    info.updated_at = now
+    _save_index(index)
+
+    session = load_session(session_id)
+    if session is None:
+        return None
+    session.status = "running"
+    session.started_at = now
+    session.ended_at = ""
+    session.runtime_ms = 0
+    return session
+
+
+def end_session_run(session_id: str, error: bool = False) -> SessionData | None:
+    """Mark a session as done/error and record runtime."""
+    index = _load_index()
+    info = index.get(session_id)
+    if info is None:
+        return None
+    now = _now()
+    info.status = "error" if error else "done"
+    info.ended_at = now
+    if info.started_at:
+        try:
+            start = datetime.fromisoformat(info.started_at)
+            end = datetime.fromisoformat(now)
+            info.runtime_ms = int((end - start).total_seconds() * 1000)
+        except ValueError:
+            info.runtime_ms = 0
+    info.updated_at = now
+    _save_index(index)
+
+    session = load_session(session_id)
+    if session is None:
+        return None
+    session.status = info.status
+    session.ended_at = now
+    session.runtime_ms = info.runtime_ms
+    return session
 
 
 def delete_session(session_id: str) -> bool:
@@ -177,11 +402,17 @@ def delete_session(session_id: str) -> bool:
 def message_to_dict(msg: object) -> dict:
     """Convert an agent-framework Message to a JSON-serialisable dict."""
     contents = []
+    usage_details: dict[str, Any] | None = None
     for c in getattr(msg, "contents", None) or []:
         ctype = c.type
         # Thinking/reasoning content blocks are persisted via additional_properties
         # so they are not replayed to the model API on the next turn.
         if ctype in ("thinking", "reasoning", "text_reasoning"):
+            continue
+        if ctype == "usage":
+            # Preserve the full usage_details dict as returned by the API.
+            usage_details = getattr(c, "usage_details", None)
+            contents.append({"type": "usage", "usage_details": usage_details})
             continue
         entry = {"type": ctype}
         if ctype == "text":
@@ -195,10 +426,13 @@ def message_to_dict(msg: object) -> dict:
             entry["name"] = c.name
             entry["result"] = c.result
         contents.append(entry)
-    result = {"role": getattr(msg, "role", "user"), "contents": contents}
+    result: dict[str, Any] = {"role": getattr(msg, "role", "user"), "contents": contents}
     thinking = getattr(msg, "additional_properties", {}).get("thinking")
     if thinking:
         result["thinking"] = thinking
+    # Also expose usage at the message top level for openclaw-style readers.
+    if usage_details:
+        result["usage"] = usage_details
     return result
 
 
@@ -229,6 +463,11 @@ def dict_to_message(d: dict) -> object:
                     result=c.get("result", ""),
                 )
             )
+        elif t == "usage":
+            from agent_framework._types import UsageDetails
+
+            details = c.get("usage_details") or d.get("usage") or {}
+            contents.append(Content(type="usage", usage_details=UsageDetails(**details)))
     additional_properties = {}
     thinking = d.get("thinking")
     if thinking:

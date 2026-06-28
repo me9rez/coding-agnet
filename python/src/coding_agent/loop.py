@@ -28,6 +28,7 @@ from coding_agent.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     TurnEndEvent,
+    UsageEvent,
 )
 
 if TYPE_CHECKING:
@@ -241,13 +242,13 @@ def _process_update(
     update: Any,
     emit: Callable[[AgentEvent], None],
 ) -> None:
-    """Extract text/thinking events from one ChatResponseUpdate chunk."""
+    """Extract text/thinking/usage events from one ChatResponseUpdate chunk."""
     # 1. Check raw_representation for thinking deltas (Anthropic / DeepSeek)
     raw = getattr(update, "raw_representation", None)
     if raw is not None:
         _extract_thinking(raw, emit)
 
-    # 2. Check contents for text and reasoning
+    # 2. Check contents for text, reasoning and usage
     contents = getattr(update, "contents", None) or []
     for c in contents:
         ctype = getattr(c, "type", None)
@@ -259,6 +260,18 @@ def _process_update(
             thinking = getattr(c, "text", "") or getattr(c, "thinking", "") or getattr(c, "reasoning_content", "") or ""
             if thinking:
                 emit(ThinkingDeltaEvent(delta=thinking))
+        elif ctype == "usage":
+            details = getattr(c, "usage_details", None) or {}
+            emit(
+                UsageEvent(
+                    input_tokens=details.get("input_token_count", 0) or 0,
+                    output_tokens=details.get("output_token_count", 0) or 0,
+                    total_tokens=details.get("total_token_count", 0) or 0,
+                    cache_read_tokens=details.get("cache_read_input_token_count", 0) or 0,
+                    reasoning_tokens=details.get("reasoning_output_token_count", 0) or 0,
+                    details=dict(details),
+                )
+            )
 
 
 def _extract_tool_calls(response: ChatResponse) -> list[Content]:

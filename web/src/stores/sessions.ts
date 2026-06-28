@@ -22,10 +22,12 @@ export const useSessionsStore = defineStore('sessions', () => {
     }
   }
 
-  async function createSession(title = '') {
+  async function createSession(title = '', model = '') {
     error.value = null
     try {
-      const session = await gatewayService.call<SessionData>('createSession', { title })
+      const params: Record<string, unknown> = { title }
+      if (model) params.model = model
+      const session = await gatewayService.call<SessionData>('createSession', params)
       await fetchSessions()
       currentSessionId.value = session.id
       return session
@@ -51,6 +53,20 @@ export const useSessionsStore = defineStore('sessions', () => {
     error.value = null
     try {
       await gatewayService.call<SessionData>('updateSession', { sessionId, title })
+      await fetchSessions()
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function updateSessionModel(sessionId: string, model: string) {
+    error.value = null
+    try {
+      await gatewayService.call<SessionData>('updateSession', { sessionId, model })
+      const local = sessions.value.find((s) => s.id === sessionId)
+      if (local) {
+        local.model = model
+      }
       await fetchSessions()
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
@@ -83,6 +99,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     createSession,
     loadSession,
     updateSession,
+    updateSessionModel,
     deleteSession,
     selectSession,
   }
