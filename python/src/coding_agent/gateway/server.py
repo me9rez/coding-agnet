@@ -118,6 +118,8 @@ class GatewayServer:
         tools: list[Any] | None = None,
         transport: StdioTransport | None = None,
         settings: object | None = None,
+        skill_provider: Any | None = None,
+        mcp_tools: list[Any] | None = None,
     ) -> None:
         self._client = client
         self._tools = tools or []
@@ -127,6 +129,8 @@ class GatewayServer:
         self._current_task: asyncio.Task[None] | None = None
         self._session: object | None = None
         self._settings = settings
+        self._skill_provider = skill_provider
+        self._mcp_tools = mcp_tools or []
 
     def _emit(self, event: AgentEvent) -> None:
         """Serialize and write one event to the transport."""
@@ -190,6 +194,7 @@ class GatewayServer:
         """Run a single prompt, auto-saving session."""
         from agent_framework._types import Content, Message
 
+        from coding_agent.mcp import format_mcp_tools_for_prompt
         from coding_agent.session import (
             SessionData,
             create_session,
@@ -198,7 +203,6 @@ class GatewayServer:
             message_to_dict,
             save_session,
         )
-        from coding_agent.skills import discover_skills, format_skills_for_prompt
         from coding_agent.system_prompt import (
             BuildSystemPromptOptions,
             build_system_prompt,
@@ -218,14 +222,13 @@ class GatewayServer:
         messages: list[object] = [dict_to_message(m) for m in session.messages]
         messages.append(Message(role="user", contents=[Content(type="text", text=text)]))
 
-        # Build system prompt with skills
-        skills = discover_skills()
-        skills_prompt = format_skills_for_prompt(skills)
+        # Build system prompt (skills are advertised via SkillsProvider).
         ctx = discover_project_context()
+        mcp_tools_prompt = format_mcp_tools_for_prompt(self._mcp_tools)
         sys_prompt = build_system_prompt(
             BuildSystemPromptOptions(
                 project_context=ctx,
-                skills_prompt=skills_prompt,
+                mcp_tools_prompt=mcp_tools_prompt,
             )
         )
         try:
@@ -239,6 +242,8 @@ class GatewayServer:
                 system_prompt=sys_prompt,
                 thinking_level=thinking or None,
                 compaction_max_tokens=max_tok,
+                skill_provider=self._skill_provider,
+                mcp_tools=self._mcp_tools,
             )
         except asyncio.CancelledError:
             logger.info("Agent run cancelled")

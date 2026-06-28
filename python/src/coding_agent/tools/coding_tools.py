@@ -37,24 +37,35 @@ _MAX_OUTPUT_CHARS = 100_000
 
 
 def create_coding_tools() -> list[FunctionTool]:
-    """Return the default set of coding tools."""
-    from agent_framework._tools import FunctionTool
+    """Return the default set of coding tools.
 
-    # Import load_skill for the skill tool
-    from coding_agent.skills import _load_skill
+    Note: ``load_skill`` is provided by the agent-framework ``SkillsProvider``
+    and is not included here.
 
-    _skill_dirs: list[str] = []
-
-    async def load_skill_wrapper(skill_name: str) -> str:
-        return await _load_skill(skill_name, _skill_dirs)
+    All tools use ``result_parser=SKIP_PARSING`` so that the agent loop's
+    function middleware can observe raw return values (including ``_ToolResult``)
+    and emit fine-grained ``ToolExecutionEndEvent`` data such as ``exit_code``.
+    """
+    from agent_framework._tools import SKIP_PARSING, FunctionTool
 
     return [
-        FunctionTool(name="bash", description="Execute a shell command", func=_bash),
-        FunctionTool(name="read", description="Read the contents of a file", func=_file_read),
+        FunctionTool(
+            name="bash",
+            description="Execute a shell command",
+            func=_bash,
+            result_parser=SKIP_PARSING,
+        ),
+        FunctionTool(
+            name="read",
+            description="Read the contents of a file",
+            func=_file_read,
+            result_parser=SKIP_PARSING,
+        ),
         FunctionTool(
             name="write",
             description="Write content to a file (creates parent dirs)",
             func=_file_write,
+            result_parser=SKIP_PARSING,
         ),
         FunctionTool(
             name="edit",
@@ -64,21 +75,19 @@ def create_coding_tools() -> list[FunctionTool]:
                 "Each oldText must match a unique, non-overlapping region."
             ),
             func=_edit,
+            result_parser=SKIP_PARSING,
         ),
         FunctionTool(
             name="search",
             description="Search file contents recursively with a regex pattern",
             func=_file_search,
+            result_parser=SKIP_PARSING,
         ),
         FunctionTool(
             name="list_dir",
             description="List files and directories at a path",
             func=_file_list,
-        ),
-        FunctionTool(
-            name="load_skill",
-            description="Load the full content of a skill by name",
-            func=load_skill_wrapper,
+            result_parser=SKIP_PARSING,
         ),
     ]
 

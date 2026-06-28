@@ -79,6 +79,7 @@ class Settings:
     primary_model: str = "deepseek/deepseek-v4-flash"
     providers: dict[str, Any] = field(default_factory=_default_providers)
     max_turns: int = 25
+    mcp_servers: dict[str, Any] = field(default_factory=dict)
 
 
 def _default_settings() -> Settings:
@@ -160,6 +161,10 @@ def load() -> Settings:
 
         if "max_turns" in data:
             s.max_turns = data["max_turns"]
+        if "mcpServers" in data:
+            s.mcp_servers = data["mcpServers"]
+        elif "mcp_servers" in data:
+            s.mcp_servers = data["mcp_servers"]
 
         if migrated:
             save(s)
@@ -178,6 +183,7 @@ def save(s: Settings) -> None:
         "primaryModel": s.primary_model,
         "providers": s.providers,
         "max_turns": s.max_turns,
+        "mcpServers": s.mcp_servers,
     }
     _SETTINGS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -219,7 +225,8 @@ def build_client(settings: Settings, model: str | None = None) -> object:
     base_url = provider.get("baseUrl", "")
     api_key = resolve_api_key(settings, model)
     if api_key:
-        from agent_framework_openai._chat_completion_client import RawOpenAIChatCompletionClient
+        from agent_framework._tools import FunctionInvocationConfiguration
+        from agent_framework_openai import OpenAIChatCompletionClient
 
         logger.info(
             "Client: provider=%s model=%s base_url=%s",
@@ -227,10 +234,14 @@ def build_client(settings: Settings, model: str | None = None) -> object:
             model_id,
             base_url,
         )
-        return RawOpenAIChatCompletionClient(
+        function_invocation_configuration: FunctionInvocationConfiguration = {
+            "max_iterations": max(settings.max_turns, 1),
+        }
+        return OpenAIChatCompletionClient(
             model=model_id,
             base_url=base_url,
             api_key=api_key,
+            function_invocation_configuration=function_invocation_configuration,
         )
 
     logger.warning("No API key found, using fake client")
@@ -252,10 +263,12 @@ class _FakeClient:
 
             async def _finalizer(updates):
                 texts = [u.text for u in updates if u.text]
-                return ChatResponse(messages=[Message(role="assistant", contents=texts)], finish_reason="stop")
+                contents = [Content(type="text", text="".join(texts))]
+                return ChatResponse(messages=[Message(role="assistant", contents=contents)], finish_reason="stop")
 
             return ResponseStream(_stream(), finalizer=_finalizer)
 
         return ChatResponse(
-            messages=[Message(role="assistant", contents=["Hello from fake client!"])], finish_reason="stop"
+            messages=[Message(role="assistant", contents=[Content(type="text", text="Hello from fake client!")])],
+            finish_reason="stop",
         )

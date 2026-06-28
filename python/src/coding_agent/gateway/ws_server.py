@@ -119,8 +119,12 @@ def _serialize_event(event: AgentEvent) -> dict[str, Any]:
         case TurnEndEvent(reason=r):
             return {"type": "turn_end", "reason": r}
         case UsageEvent(
-            input_tokens=i, output_tokens=o, total_tokens=t,
-            cache_read_tokens=c, reasoning_tokens=r, details=d,
+            input_tokens=i,
+            output_tokens=o,
+            total_tokens=t,
+            cache_read_tokens=c,
+            reasoning_tokens=r,
+            details=d,
         ):
             return {
                 "type": "usage",
@@ -178,11 +182,15 @@ class WsGatewayServer:
         *,
         host: str = "127.0.0.1",
         port: int = 8765,
+        skill_provider: Any | None = None,
+        mcp_tools: list[Any] | None = None,
     ) -> None:
         self._tools = tools or []
         self._settings = settings
         self._host = host
         self._port = port
+        self._skill_provider = skill_provider
+        self._mcp_tools = mcp_tools or []
         self._current_task: asyncio.Task[None] | None = None
         self._session: Any = None
         self._ws: ServerConnection | None = None
@@ -358,8 +366,8 @@ class WsGatewayServer:
         from agent_framework._types import Content, Message
 
         from coding_agent.loop import run_coding_agent
+        from coding_agent.mcp import format_mcp_tools_for_prompt
         from coding_agent.session import dict_to_message, message_to_dict
-        from coding_agent.skills import discover_skills, format_skills_for_prompt
         from coding_agent.system_prompt import (
             BuildSystemPromptOptions,
             build_system_prompt,
@@ -383,13 +391,17 @@ class WsGatewayServer:
         session = start_session_run(session.id) or session
         self._session = session
 
-        # Build messages
+        # Build messages (skills are advertised via SkillsProvider).
         messages: list[object] = [dict_to_message(m) for m in session.messages]
         messages.append(Message(role="user", contents=[Content(type="text", text=text)]))
-        skills = discover_skills()
-        skills_prompt = format_skills_for_prompt(skills)
         ctx = discover_project_context()
-        sys_prompt = build_system_prompt(BuildSystemPromptOptions(project_context=ctx, skills_prompt=skills_prompt))
+        mcp_tools_prompt = format_mcp_tools_for_prompt(self._mcp_tools)
+        sys_prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                project_context=ctx,
+                mcp_tools_prompt=mcp_tools_prompt,
+            )
+        )
 
         error_occurred = False
 
@@ -417,6 +429,8 @@ class WsGatewayServer:
                 system_prompt=sys_prompt,
                 thinking_level=options.get("reasoning_effort") if options else None,
                 compaction_max_tokens=max_tok,
+                skill_provider=self._skill_provider,
+                mcp_tools=self._mcp_tools,
             )
         except asyncio.CancelledError:
             logger.info("Agent run cancelled")

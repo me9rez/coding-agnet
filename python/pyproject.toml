@@ -11,6 +11,7 @@ dependencies = [
     "agent-framework-anthropic>=1.0.0b260618",
     "agent-framework-core>=1.9.0",
     "agent-framework-openai>=1.8.2",
+    "mcp>=1.21.1",
     "websockets>=15.0",
 ]
 
@@ -23,7 +24,7 @@ packages = ["src/coding_agent"]
 [tool.ruff]
 line-length = 120
 target-version = "py314"
-src = ["src"]
+src = ["src", "tests"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -46,12 +47,18 @@ ignore = [
 [tool.pyright]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
-include = ["src"]
+include = ["src", "tests"]
 venvPath = "."
 venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
     "pyright>=1.1.411",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.25.3",
     "ruff>=0.15.20",
 ]

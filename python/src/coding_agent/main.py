@@ -15,6 +15,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
+from coding_agent.mcp import create_mcp_tools, format_mcp_tools_for_prompt
 from coding_agent.settings import (
     Settings,
     _split_selected_model,
@@ -23,6 +24,7 @@ from coding_agent.settings import (
     thinking_level,
 )
 from coding_agent.settings import load as load_settings
+from coding_agent.skills import create_skills_provider
 from coding_agent.tools.coding_tools import create_coding_tools
 from coding_agent.web_server import run_static_server
 
@@ -130,9 +132,17 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
 
     client = _build_client(settings)
     tools = create_coding_tools()
+    skill_provider = create_skills_provider()
+    mcp_tools = create_mcp_tools(settings)
+    mcp_tools_prompt = format_mcp_tools_for_prompt(mcp_tools)
     messages: list[Message] = [Message(role="user", contents=[prompt])]
     ctx = discover_project_context()
-    sys_prompt = build_system_prompt(BuildSystemPromptOptions(project_context=ctx))
+    sys_prompt = build_system_prompt(
+        BuildSystemPromptOptions(
+            project_context=ctx,
+            mcp_tools_prompt=mcp_tools_prompt,
+        )
+    )
 
     def on_event(event: object) -> None:
         line = json.dumps(
@@ -157,6 +167,8 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
         system_prompt=sys_prompt,
         thinking_level=lvl,
         compaction_max_tokens=max_tok,
+        skill_provider=skill_provider,
+        mcp_tools=mcp_tools,
     )
 
 
@@ -194,6 +206,9 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
 
     print(f"Gateway starting, sessions → {_SESSIONS_DIR}", file=sys.stderr, flush=True)
 
+    skill_provider = create_skills_provider()
+    mcp_tools = create_mcp_tools(settings)
+
     if ws_port:
         from coding_agent.gateway.ws_server import WsGatewayServer
 
@@ -201,6 +216,8 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
             tools=create_coding_tools(),
             settings=settings,
             port=ws_port,
+            skill_provider=skill_provider,
+            mcp_tools=mcp_tools,
         )
         await server.run_forever()
     else:
@@ -212,6 +229,8 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
             tools=create_coding_tools(),
             transport=StdioTransport(),
             settings=settings,
+            skill_provider=skill_provider,
+            mcp_tools=mcp_tools,
         )
         await server.run()
 

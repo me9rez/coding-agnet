@@ -233,9 +233,7 @@ def save_session(session: SessionData) -> None:
     usage = _aggregate_usage(session.messages)
     index = _load_index()
     existing = index.get(session.id)
-    session_started_at = session.session_started_at or (
-        existing.session_started_at if existing else session.created_at
-    )
+    session_started_at = session.session_started_at or (existing.session_started_at if existing else session.created_at)
     index[session.id] = SessionInfo(
         id=session.id,
         created_at=session.created_at,

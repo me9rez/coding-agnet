@@ -42,6 +42,7 @@ class BuildSystemPromptOptions:
     extra_guidelines: Sequence[str] = field(default_factory=tuple)
     project_context: ProjectContext | None = None
     skills_prompt: str = ""
+    mcp_tools_prompt: str = ""
 
 
 # ── Builder ─────────────────────────────────────────────────────
@@ -81,6 +82,11 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
     # Skills
     if options.skills_prompt:
         parts.append(options.skills_prompt)
+
+    # MCP tools
+    if options.mcp_tools_prompt:
+        parts.append(options.mcp_tools_prompt)
+
     # Project context
     ctx = options.project_context
     if ctx and ctx.cwd:
