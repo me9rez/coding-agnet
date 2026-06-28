@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { GatewayService } from '../gateway'
+import { GatewayService } from '@/services/gateway'
 
 class MockWebSocket {
   static instances: MockWebSocket[] = []

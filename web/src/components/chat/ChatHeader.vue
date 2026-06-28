@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { gatewayService } from '@/services/gateway'
 import { useSessionsStore } from '@/stores/sessions'
 
 const sessionsStore = useSessionsStore()
+const route = useRoute()
 const connected = ref(gatewayService.isConnected())
 
 let unsubscribeOpen: (() => void) | null = null
@@ -25,8 +27,9 @@ onUnmounted(() => {
 })
 
 const currentTitle = computed(() => {
-  if (!sessionsStore.currentSessionId) return 'Coding Agent'
-  const session = sessionsStore.sessions.find((s) => s.id === sessionsStore.currentSessionId)
+  const id = route.params.sessionId
+  if (typeof id !== 'string' || id.length === 0) return 'Coding Agent'
+  const session = sessionsStore.sessions.find((s) => s.id === id)
   return session?.title || '未命名会话'
 })
 </script>

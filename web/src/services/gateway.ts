@@ -145,8 +145,17 @@ export class GatewayService {
     )
   }
 
-  cancel(): void {
-    this.send(JSON.stringify({ method: 'cancel', params: {} }))
+  sendApprovalResponse(callId: string, approved: boolean, remember = false): void {
+    this.send(
+      JSON.stringify({
+        method: 'approval_response',
+        params: { callId, approved, remember },
+      }),
+    )
+  }
+
+  cancel(sessionId?: string): void {
+    this.send(JSON.stringify({ method: 'cancel', params: { sessionId } }))
   }
 
   close(): void {

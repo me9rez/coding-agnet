@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { convertBackendMessages } from './chat'
+import { convertBackendMessages } from '@/stores/chat'
 
 describe('convertBackendMessages', () => {
   it('keeps consecutive user messages separate', () => {

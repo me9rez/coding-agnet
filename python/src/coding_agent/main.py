@@ -15,6 +15,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
+from coding_agent.mcp import create_mcp_tools, format_mcp_tools_for_prompt
 from coding_agent.settings import (
     Settings,
     _split_selected_model,
@@ -23,6 +24,7 @@ from coding_agent.settings import (
     thinking_level,
 )
 from coding_agent.settings import load as load_settings
+from coding_agent.skills import create_skills_provider
 from coding_agent.tools.coding_tools import create_coding_tools
 from coding_agent.web_server import run_static_server
 
@@ -121,6 +123,10 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
     """Run one prompt in CLI test mode, printing events to stderr."""
     from agent_framework._types import Message
 
+    from coding_agent.framework_session import (
+        get_or_create_framework_session,
+        save_framework_session,
+    )
     from coding_agent.loop import run_coding_agent
     from coding_agent.system_prompt import (
         BuildSystemPromptOptions,
@@ -129,10 +135,24 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
     )
 
     client = _build_client(settings)
-    tools = create_coding_tools()
+    tools = create_coding_tools(approval_config=settings.tool_approval)
+    skill_provider = create_skills_provider()
+    try:
+        mcp_tools = create_mcp_tools(settings)
+        mcp_tools_prompt = format_mcp_tools_for_prompt(mcp_tools)
+    except Exception as exc:
+        logger.warning("MCP tools unavailable in test mode: %s", exc)
+        mcp_tools = []
+        mcp_tools_prompt = ""
     messages: list[Message] = [Message(role="user", contents=[prompt])]
     ctx = discover_project_context()
-    sys_prompt = build_system_prompt(BuildSystemPromptOptions(project_context=ctx))
+    sys_prompt = build_system_prompt(
+        BuildSystemPromptOptions(
+            project_context=ctx,
+            mcp_tools_prompt=mcp_tools_prompt,
+            tool_approval=settings.tool_approval,
+        )
+    )
 
     def on_event(event: object) -> None:
         line = json.dumps(
@@ -149,6 +169,73 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
     model_cfg = model_config(settings)
     lvl = thinking_level(settings)
     max_tok = model_cfg.get("contextWindow") if model_cfg else None
+    if settings.workflow_loop:
+        from coding_agent.workflow_loop import (
+            PendingApproval,
+            WorkflowOutput,
+            resume_coding_workflow,
+            run_coding_workflow,
+        )
+
+        framework_session = get_or_create_framework_session("test-mode")
+        approval_enabled = bool(getattr(settings, "tool_approval", {}).get("enabled", True))
+        try:
+            result = await run_coding_workflow(
+                client=client,  # type: ignore[arg-type]
+                messages=messages,
+                tools=tools,
+                on_event=on_event,
+                system_prompt=sys_prompt,
+                thinking_level=lvl,
+                skill_provider=skill_provider,
+                mcp_tools=mcp_tools,
+                framework_session=framework_session,
+                approval_enabled=approval_enabled,
+            )
+            if isinstance(result, PendingApproval):
+                print(
+                    f"PENDING_APPROVAL: {result.name}({result.arguments})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                print(
+                    f"SESSION_BEFORE_RESUME: {framework_session.to_dict()}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                # Auto-approve for CLI test mode so the run can complete.
+                resumed = await resume_coding_workflow(
+                    pending=result,
+                    approved=True,
+                    framework_session=framework_session,
+                    client=client,  # type: ignore[arg-type]
+                    tools=tools,
+                    on_event=on_event,
+                    system_prompt=sys_prompt,
+                    thinking_level=lvl,
+                    skill_provider=skill_provider,
+                    mcp_tools=mcp_tools,
+                    approval_enabled=approval_enabled,
+                )
+                if isinstance(resumed, WorkflowOutput):
+                    print(f"Final: {resumed.text}", file=sys.stderr)
+                elif isinstance(resumed, PendingApproval):
+                    print(
+                        f"PENDING_APPROVAL: {resumed.name}({resumed.arguments})",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            elif isinstance(result, WorkflowOutput):
+                print(f"Final: {result.text}", file=sys.stderr)
+        finally:
+            print(
+                f"SESSION_AFTER: {framework_session.to_dict()}",
+                file=sys.stderr,
+                flush=True,
+            )
+            save_framework_session(framework_session)
+        return
+
     await run_coding_agent(
         client=client,  # type: ignore[arg-type]
         messages=messages,
@@ -157,6 +244,8 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
         system_prompt=sys_prompt,
         thinking_level=lvl,
         compaction_max_tokens=max_tok,
+        skill_provider=skill_provider,
+        mcp_tools=mcp_tools,
     )
 
 
@@ -194,13 +283,18 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
 
     print(f"Gateway starting, sessions → {_SESSIONS_DIR}", file=sys.stderr, flush=True)
 
+    skill_provider = create_skills_provider()
+    mcp_tools = create_mcp_tools(settings)
+
     if ws_port:
         from coding_agent.gateway.ws_server import WsGatewayServer
 
         server = WsGatewayServer(
-            tools=create_coding_tools(),
+            tools=create_coding_tools(approval_config=settings.tool_approval),
             settings=settings,
             port=ws_port,
+            skill_provider=skill_provider,
+            mcp_tools=mcp_tools,
         )
         await server.run_forever()
     else:
@@ -209,9 +303,11 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
 
         server = GatewayServer(
             client=_build_client(settings),
-            tools=create_coding_tools(),
+            tools=create_coding_tools(approval_config=settings.tool_approval),
             transport=StdioTransport(),
             settings=settings,
+            skill_provider=skill_provider,
+            mcp_tools=mcp_tools,
         )
         await server.run()
 

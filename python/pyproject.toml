@@ -11,6 +11,9 @@ dependencies = [
     "agent-framework-anthropic>=1.0.0b260618",
     "agent-framework-core>=1.9.0",
     "agent-framework-openai>=1.8.2",
+    "agent-framework-orchestrations>=1.0.0",
+    "httpx>=0.28.0",
+    "mcp>=1.21.1",
     "websockets>=15.0",
 ]
 
@@ -20,10 +23,14 @@ coding-agent = "coding_agent.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/coding_agent"]
 
+[[tool.uv.index]]
+url = "http://mirrors.aliyun.com/pypi/simple"
+default = true
+
 [tool.ruff]
 line-length = 120
 target-version = "py314"
-src = ["src"]
+src = ["src", "tests"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -41,17 +48,24 @@ select = [
 ]
 ignore = [
     "SIM105",  # contextlib.suppress — not always clearer
+    "RUF001",  # 中文全角标点是正常用法，不算 ambiguous
 ]
 
 [tool.pyright]
 pythonVersion = "3.14"
 typeCheckingMode = "standard"
-include = ["src"]
+include = ["src", "tests"]
 venvPath = "."
 venv = ".venv"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
     "pyright>=1.1.411",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.25.3",
     "ruff>=0.15.20",
 ]

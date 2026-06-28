@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { gatewayService } from '@/services/gateway'
-import { useSessionsStore } from '../sessions'
+import { useSessionsStore } from '@/stores/sessions'
 
 vi.mock('@/services/gateway', () => ({
   gatewayService: {

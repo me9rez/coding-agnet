@@ -3,6 +3,7 @@ export interface SessionInfo {
   title: string
   model: string
   modelProvider: string
+  workspace: string
   createdAt: string
   updatedAt: string
   messageCount: number
@@ -25,6 +26,7 @@ export interface SessionData {
   title: string
   model: string
   modelProvider: string
+  workspace: string
   createdAt: string
   updatedAt: string
   messages: Message[]

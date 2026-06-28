@@ -31,6 +31,7 @@ class SessionInfo:
     title: str = ""
     model: str = ""
     model_provider: str = ""
+    workspace: str = ""
     status: str = "idle"
     session_file: str = ""
     session_started_at: str = ""
@@ -57,6 +58,7 @@ class SessionData:
     updated_at: str = ""
     model: str = ""
     model_provider: str = ""
+    workspace: str = ""
     status: str = "idle"
     session_file: str = ""
     session_started_at: str = ""
@@ -111,6 +113,7 @@ def _load_index() -> dict[str, SessionInfo]:
                 title=info.get("title", ""),
                 model=info.get("model", ""),
                 model_provider=info.get("model_provider", ""),
+                workspace=info.get("workspace", ""),
                 status=info.get("status", "idle"),
                 session_file=info.get("session_file", ""),
                 session_started_at=info.get("session_started_at", ""),
@@ -141,6 +144,7 @@ def _info_to_dict(info: SessionInfo) -> dict[str, Any]:
         "title": info.title,
         "model": info.model,
         "model_provider": info.model_provider,
+        "workspace": info.workspace,
         "status": info.status,
         "session_file": info.session_file,
         "session_started_at": info.session_started_at,
@@ -171,7 +175,7 @@ def list_sessions() -> list[SessionInfo]:
     return sessions
 
 
-def create_session(title: str = "", model: str = "") -> SessionData:
+def create_session(title: str = "", model: str = "", workspace: str = "") -> SessionData:
     """Create a new empty session."""
     now = _now()
     session_id = uuid.uuid4().hex[:12]
@@ -181,6 +185,7 @@ def create_session(title: str = "", model: str = "") -> SessionData:
         title=title,
         model=model,
         model_provider=provider_id,
+        workspace=workspace,
         created_at=now,
         updated_at=now,
         session_file=str(_session_path(session_id)),
@@ -233,9 +238,7 @@ def save_session(session: SessionData) -> None:
     usage = _aggregate_usage(session.messages)
     index = _load_index()
     existing = index.get(session.id)
-    session_started_at = session.session_started_at or (
-        existing.session_started_at if existing else session.created_at
-    )
+    session_started_at = session.session_started_at or (existing.session_started_at if existing else session.created_at)
     index[session.id] = SessionInfo(
         id=session.id,
         created_at=session.created_at,
@@ -244,6 +247,7 @@ def save_session(session: SessionData) -> None:
         title=session.title,
         model=session.model,
         model_provider=session.model_provider,
+        workspace=session.workspace,
         status=session.status,
         session_file=session.session_file or str(path),
         session_started_at=session_started_at,
@@ -288,6 +292,7 @@ def load_session(session_id: str) -> SessionData | None:
         title=info.title,
         model=info.model,
         model_provider=info.model_provider,
+        workspace=info.workspace,
         status=info.status,
         session_file=info.session_file or str(path),
         session_started_at=info.session_started_at,
@@ -403,11 +408,18 @@ def message_to_dict(msg: object) -> dict:
     """Convert an agent-framework Message to a JSON-serialisable dict."""
     contents = []
     usage_details: dict[str, Any] | None = None
+    thinking_parts: list[str] = []
     for c in getattr(msg, "contents", None) or []:
-        ctype = c.type
-        # Thinking/reasoning content blocks are persisted via additional_properties
-        # so they are not replayed to the model API on the next turn.
+        ctype = getattr(c, "type", None)
+        # Thinking/reasoning content blocks are not replayed to the model API
+        # on subsequent turns, but their text must still be persisted so the
+        # TUI / debugging tools can display what the model reasoned about.
         if ctype in ("thinking", "reasoning", "text_reasoning"):
+            ctext = (
+                getattr(c, "text", None) or getattr(c, "thinking", None) or getattr(c, "reasoning_content", None) or ""
+            )
+            if ctext:
+                thinking_parts.append(str(ctext))
             continue
         if ctype == "usage":
             # Preserve the full usage_details dict as returned by the API.
@@ -427,9 +439,13 @@ def message_to_dict(msg: object) -> dict:
             entry["result"] = c.result
         contents.append(entry)
     result: dict[str, Any] = {"role": getattr(msg, "role", "user"), "contents": contents}
-    thinking = getattr(msg, "additional_properties", {}).get("thinking")
-    if thinking:
-        result["thinking"] = thinking
+    # Merge thinking from additional_properties (legacy path set by loop.py)
+    # with any thinking collected from content blocks above.
+    additional_thinking = getattr(msg, "additional_properties", {}).get("thinking")
+    if additional_thinking:
+        thinking_parts.insert(0, str(additional_thinking))
+    if thinking_parts:
+        result["thinking"] = "\n".join(p for p in thinking_parts if p)
     # Also expose usage at the message top level for openclaw-style readers.
     if usage_details:
         result["usage"] = usage_details

@@ -1,14 +1,47 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import ChatView from '../views/ChatView.vue'
+import ChatSessionView from '../views/ChatSessionView.vue'
+import EmptyStateView from '../views/EmptyStateView.vue'
 import SettingsLayout from '../views/settings/SettingsLayout.vue'
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/',
-      name: 'chat',
       component: ChatView,
+      children: [
+        {
+          path: '',
+          name: 'chat-home',
+          component: EmptyStateView,
+          meta: { keepAliveKey: 'home' },
+        },
+        {
+          path: 'chat/:sessionId',
+          name: 'chat-session',
+          component: ChatSessionView,
+          props: true,
+          meta: { keepAliveKey: 'session' },
+        },
+      ],
+    },
+    {
+      path: '/toolbox',
+      component: () => import('../views/toolbox/ToolboxLayout.vue'),
+      redirect: '/toolbox/skills',
+      children: [
+        {
+          path: 'skills',
+          name: 'toolbox-skills',
+          component: () => import('../views/toolbox/SkillsView.vue'),
+        },
+        {
+          path: 'connectors',
+          name: 'toolbox-connectors',
+          component: () => import('../views/toolbox/ConnectorsView.vue'),
+        },
+      ],
     },
     {
       path: '/settings',
@@ -64,6 +97,23 @@ const router = createRouter({
           path: 'version',
           name: 'settings-version',
           component: () => import('../views/settings/SettingsVersionView.vue'),
+        },
+      ],
+    },
+    {
+      path: '/automation',
+      component: () => import('../views/automation/AutomationLayout.vue'),
+      redirect: '/automation/tasks',
+      children: [
+        {
+          path: 'tasks',
+          name: 'automation-tasks',
+          component: () => import('../views/automation/ScheduledTasksView.vue'),
+        },
+        {
+          path: 'listeners',
+          name: 'automation-listeners',
+          component: () => import('../views/automation/EventListenersView.vue'),
         },
       ],
     },

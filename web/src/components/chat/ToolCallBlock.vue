@@ -13,20 +13,27 @@ const status = computed(() => {
 })
 
 const expanded = ref(status.value === 'pending')
-const showScript = ref(true)
+const showParams = ref(true)
 const showResult = ref(true)
 
-const command = computed(() => {
+const toolName = computed(() => props.message.toolCall?.name || 'tool')
+
+const params = computed(() => {
   try {
     const args = JSON.parse(props.message.toolCall?.arguments || '{}')
-    return args.command || ''
+    return args
   } catch {
-    return props.message.toolCall?.arguments || ''
+    return {}
   }
 })
 
+const paramsStr = computed(() => {
+  const p = params.value
+  if (Object.keys(p).length === 0) return ''
+  return JSON.stringify(p, null, 2)
+})
+
 const output = computed(() => props.message.toolExecution?.output || '')
-const toolName = computed(() => props.message.toolCall?.name || 'tool')
 </script>
 
 <template>
@@ -55,14 +62,14 @@ const toolName = computed(() => props.message.toolCall?.name || 'tool')
       />
     </button>
 
-    <div v-if="expanded" class="px-3 pb-3 pt-1 space-y-3">
-      <div class="flex items-center gap-2">
+    <div v-if="expanded" class="px-3 pb-3 pt-1">
+      <div class="flex items-center gap-2 mb-2">
         <button
           class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full border border-[var(--border)] bg-[var(--bg-muted)] text-[var(--text-muted)] hover:bg-[var(--bg-page)] transition"
-          @click.stop="showScript = !showScript"
+          @click.stop="showParams = !showParams"
         >
-          脚本
-          <ChevronDown v-if="showScript" class="w-3 h-3" />
+          参数
+          <ChevronDown v-if="showParams" class="w-3 h-3" />
           <ChevronRight v-else class="w-3 h-3" />
         </button>
         <button
@@ -75,8 +82,16 @@ const toolName = computed(() => props.message.toolCall?.name || 'tool')
         </button>
       </div>
 
-      <pre v-if="showScript" class="text-xs bg-[var(--bg-muted)] rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-all">{{ command || toolName }}</pre>
-      <pre v-if="showResult" class="text-xs bg-[var(--bg-muted)] rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-all min-h-[2rem]">{{ output || '等待输出…' }}</pre>
+      <div v-if="showParams" class="mb-2">
+        <div class="text-xs text-[var(--text-subtle)] mb-1">输入</div>
+        <pre v-if="paramsStr" class="text-xs bg-[var(--bg-muted)] rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-all max-h-40 overflow-y-auto">{{ paramsStr }}</pre>
+        <div v-else class="text-xs text-[var(--text-subtle)]">无参数</div>
+      </div>
+
+      <div v-if="showResult">
+        <div class="text-xs text-[var(--text-subtle)] mb-1">输出</div>
+        <pre class="text-xs bg-[var(--bg-muted)] rounded-lg p-2.5 overflow-x-auto whitespace-pre-wrap break-all max-h-60 overflow-y-auto min-h-[2rem]">{{ output || '等待输出…' }}</pre>
+      </div>
     </div>
   </div>
 </template>

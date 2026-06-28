@@ -1,12 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { gatewayService } from '@/services/gateway'
-import type { MessageContent, SessionData, UiMessage } from '@/types/session'
+import type { MessageContent, UiMessage } from '@/types/session'
 import {
   isDoneEvent,
   isErrorEvent,
   isTextDeltaEvent,
   isThinkingDeltaEvent,
+  isToolApprovalRequestEvent,
   isToolCallStartEvent,
   isToolExecutionDeltaEvent,
   isToolExecutionEndEvent,
@@ -15,27 +16,114 @@ import {
 } from '@/types/gateway'
 import { generateId } from '@/utils/uid'
 
-export type RunState = 'idle' | 'running'
+export type RunState = 'idle' | 'running' | 'waiting_approval'
+
+export interface PendingApproval {
+  callId: string
+  name: string
+  arguments: string
+}
+
+interface SessionData {
+  messages: UiMessage[]
+  runState: RunState
+  error: string | null
+  pendingApprovals: PendingApproval[]
+  loaded: boolean
+}
 
 export const useChatStore = defineStore('chat', () => {
-  const messages = ref<UiMessage[]>([])
-  const runState = ref<RunState>('idle')
-  const error = ref<string | null>(null)
+  const sessions = ref<Map<string, SessionData>>(new Map())
+  const activeSessionId = ref<string | null>(null)
 
-  const isRunning = computed(() => runState.value === 'running')
+  const messages = computed(() => {
+    if (!activeSessionId.value) return []
+    return sessions.value.get(activeSessionId.value)?.messages || []
+  })
+
+  const runState = computed((): RunState => {
+    if (!activeSessionId.value) return 'idle'
+    return sessions.value.get(activeSessionId.value)?.runState || 'idle'
+  })
+
+  const error = computed(() => {
+    if (!activeSessionId.value) return null
+    return sessions.value.get(activeSessionId.value)?.error || null
+  })
+
+  const pendingApprovals = computed(() => {
+    if (!activeSessionId.value) return []
+    return sessions.value.get(activeSessionId.value)?.pendingApprovals || []
+  })
+
+  const isRunning = computed(() => runState.value === 'running' || runState.value === 'waiting_approval')
+
+  function getOrCreateSession(sessionId: string): SessionData {
+    if (!sessions.value.has(sessionId)) {
+      sessions.value.set(sessionId, {
+        messages: [],
+        runState: 'idle',
+        error: null,
+        pendingApprovals: [],
+        loaded: false,
+      })
+    }
+    return sessions.value.get(sessionId)!
+  }
 
   function reset() {
-    messages.value = []
-    runState.value = 'idle'
-    error.value = null
+    sessions.value.clear()
+    activeSessionId.value = null
   }
 
-  function loadSession(session: SessionData) {
-    messages.value = convertBackendMessages(session.messages)
+  function setActiveSession(sessionId: string) {
+    getOrCreateSession(sessionId)
+    activeSessionId.value = sessionId
   }
 
-  function addUserMessage(text: string) {
-    messages.value.push({
+  function addPendingApproval(sessionId: string, approval: PendingApproval) {
+    const session = getOrCreateSession(sessionId)
+    const last = session.messages[session.messages.length - 1]
+    if (
+      last &&
+      last.role === 'assistant' &&
+      last.loading &&
+      !last.content.trim() &&
+      !last.thinking?.trim()
+    ) {
+      session.messages.pop()
+    }
+    session.pendingApprovals.push(approval)
+    session.runState = 'waiting_approval'
+  }
+
+  function removePendingApproval(sessionId: string, callId: string) {
+    const session = getOrCreateSession(sessionId)
+    session.pendingApprovals = session.pendingApprovals.filter((a) => a.callId !== callId)
+    if (session.pendingApprovals.length === 0 && session.runState === 'waiting_approval') {
+      session.runState = 'running'
+    }
+  }
+
+  function sendApprovalResponse(callId: string, approved: boolean, remember = false) {
+    gatewayService.sendApprovalResponse(callId, approved, remember)
+    if (activeSessionId.value) {
+      removePendingApproval(activeSessionId.value, callId)
+    }
+  }
+
+  function loadSession(session: { id: string; messages: MessageContent[] }) {
+    const sessionData = getOrCreateSession(session.id)
+    if (!sessionData.loaded) {
+      sessionData.messages = convertBackendMessages(session.messages)
+      sessionData.loaded = true
+    }
+    activeSessionId.value = session.id
+  }
+
+  function addUserMessage(sessionId: string, text: string) {
+    const session = getOrCreateSession(sessionId)
+    session.messages.push({
       id: generateId('msg'),
       role: 'user',
       content: text,
@@ -43,8 +131,9 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  function ensureAssistantMessage(): UiMessage {
-    const last = messages.value[messages.value.length - 1]
+  function ensureAssistantMessage(sessionId: string): UiMessage {
+    const session = getOrCreateSession(sessionId)
+    const last = session.messages[session.messages.length - 1]
     if (last && last.role === 'assistant' && !last.toolCall && !last.toolExecution) {
       return last
     }
@@ -54,24 +143,61 @@ export const useChatStore = defineStore('chat', () => {
       content: '',
       timestamp: Date.now(),
     }
-    messages.value.push(msg)
+    session.messages.push(msg)
     return msg
   }
 
-  function appendTextDelta(delta: string) {
-    const msg = ensureAssistantMessage()
+  function appendTextDelta(sessionId: string, delta: string) {
+    const session = getOrCreateSession(sessionId)
+    const last = session.messages[session.messages.length - 1]
+    let msg: UiMessage
+    if (last && last.role === 'assistant' && !last.toolCall && !last.toolExecution) {
+      msg = last
+    } else {
+      msg = {
+        id: generateId('msg'),
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+      }
+      session.messages.push(msg)
+    }
     msg.loading = false
     msg.content += delta
   }
 
-  function appendThinkingDelta(delta: string) {
-    const msg = ensureAssistantMessage()
+  function appendThinkingDelta(sessionId: string, delta: string) {
+    const session = getOrCreateSession(sessionId)
+    const last = session.messages[session.messages.length - 1]
+    let msg: UiMessage
+    if (last && last.role === 'assistant' && !last.toolCall && !last.toolExecution) {
+      msg = last
+    } else {
+      msg = {
+        id: generateId('msg'),
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+      }
+      session.messages.push(msg)
+    }
     msg.loading = false
     msg.thinking = (msg.thinking ?? '') + delta
   }
 
-  function startToolCall(callId: string, name: string, args: string) {
-    messages.value.push({
+  function startToolCall(sessionId: string, callId: string, name: string, args: string) {
+    const session = getOrCreateSession(sessionId)
+    const last = session.messages[session.messages.length - 1]
+    if (
+      last &&
+      last.role === 'assistant' &&
+      last.loading &&
+      !last.content.trim() &&
+      !last.thinking?.trim()
+    ) {
+      session.messages.pop()
+    }
+    session.messages.push({
       id: generateId('tool'),
       role: 'tool',
       content: '',
@@ -80,12 +206,15 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  function startToolExecution(callId: string, name: string) {
-    const tool = findToolMessage(callId)
+  function startToolExecution(sessionId: string, callId: string, name: string) {
+    const session = getOrCreateSession(sessionId)
+    const tool = session.messages.find(
+      (m) => m.role === 'tool' && (m.toolCall?.callId === callId || m.toolExecution?.callId === callId),
+    )
     if (tool) {
       tool.toolExecution = { callId, name, output: '', ok: false, exitCode: 0, finished: false }
     } else {
-      messages.value.push({
+      session.messages.push({
         id: generateId('tool'),
         role: 'tool',
         content: '',
@@ -95,108 +224,180 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function findToolMessage(callId: string): UiMessage | undefined {
-    return messages.value.find(
+  function appendToolExecutionDelta(sessionId: string, callId: string, line: string) {
+    const session = getOrCreateSession(sessionId)
+    const tool = session.messages.find(
       (m) => m.role === 'tool' && (m.toolCall?.callId === callId || m.toolExecution?.callId === callId),
     )
-  }
-
-  function appendToolExecutionDelta(callId: string, line: string) {
-    const tool = findToolMessage(callId)
     if (tool?.toolExecution) {
       tool.toolExecution.output += line
     }
   }
 
-  function endToolExecution(callId: string, name: string, ok: boolean, exitCode: number) {
-    const tool = findToolMessage(callId)
+  function endToolExecution(sessionId: string, callId: string, name: string, ok: boolean, exitCode: number, result?: string) {
+    const session = getOrCreateSession(sessionId)
+    const tool = session.messages.find(
+      (m) => m.role === 'tool' && (m.toolCall?.callId === callId || m.toolExecution?.callId === callId),
+    )
     if (tool) {
       if (!tool.toolExecution) {
-        tool.toolExecution = { callId, name, output: '', ok, exitCode, finished: true }
+        tool.toolExecution = { callId, name, output: result || '', ok, exitCode, finished: true }
       } else {
         tool.toolExecution.ok = ok
         tool.toolExecution.exitCode = exitCode
         tool.toolExecution.finished = true
+        if (result !== undefined) {
+          tool.toolExecution.output = result
+        }
       }
     }
   }
 
   function sendMessage(text: string, sessionId?: string) {
     if (!text.trim()) return
-    addUserMessage(text)
-    runState.value = 'running'
-    error.value = null
-    messages.value.push({
+    const targetSessionId = sessionId || activeSessionId.value
+    if (!targetSessionId) return
+
+    getOrCreateSession(targetSessionId)
+    activeSessionId.value = targetSessionId
+
+    const session = sessions.value.get(targetSessionId)!
+    session.runState = 'running'
+    session.error = null
+
+    addUserMessage(targetSessionId, text)
+
+    session.messages.push({
       id: generateId('msg'),
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
       loading: true,
     })
-    gatewayService.sendPrompt(text, sessionId)
+
+    gatewayService.sendPrompt(text, targetSessionId)
   }
 
   function stop() {
-    gatewayService.cancel()
+    if (activeSessionId.value) {
+      gatewayService.cancel(activeSessionId.value)
+    }
   }
 
   function setupEventListeners() {
     gatewayService.on('text_delta', (event) => {
-      if (isTextDeltaEvent(event)) appendTextDelta(event.delta)
+      if (isTextDeltaEvent(event) && event.sessionId) {
+        const session = sessions.value.get(event.sessionId)
+        if (session && session.runState !== 'idle') {
+          appendTextDelta(event.sessionId, event.delta)
+        }
+      }
     })
     gatewayService.on('thinking_delta', (event) => {
-      if (isThinkingDeltaEvent(event)) appendThinkingDelta(event.delta)
+      if (isThinkingDeltaEvent(event) && event.sessionId) {
+        const session = sessions.value.get(event.sessionId)
+        if (session && session.runState !== 'idle') {
+          appendThinkingDelta(event.sessionId, event.delta)
+        }
+      }
     })
     gatewayService.on('tool_call_start', (event) => {
-      if (isToolCallStartEvent(event)) startToolCall(event.callId, event.name, event.arguments)
+      if (isToolCallStartEvent(event) && event.sessionId) {
+        const session = sessions.value.get(event.sessionId)
+        if (session && session.runState !== 'idle') {
+          startToolCall(event.sessionId, event.callId, event.name, event.arguments)
+        }
+      }
     })
     gatewayService.on('tool_execution_start', (event) => {
-      if (isToolExecutionStartEvent(event)) {
-        startToolExecution(event.callId, event.name)
+      if (isToolExecutionStartEvent(event) && event.sessionId) {
+        const session = sessions.value.get(event.sessionId)
+        if (session && session.runState !== 'idle') {
+          startToolExecution(event.sessionId, event.callId, event.name)
+        }
       }
     })
     gatewayService.on('tool_execution_delta', (event) => {
-      if (isToolExecutionDeltaEvent(event)) appendToolExecutionDelta(event.callId, event.line)
+      if (isToolExecutionDeltaEvent(event) && event.sessionId) {
+        const session = sessions.value.get(event.sessionId)
+        if (session && session.runState !== 'idle') {
+          appendToolExecutionDelta(event.sessionId, event.callId, event.line)
+        }
+      }
     })
     gatewayService.on('tool_execution_end', (event) => {
-      if (isToolExecutionEndEvent(event)) endToolExecution(event.callId, event.name, event.ok, event.exitCode)
+      if (isToolExecutionEndEvent(event) && event.sessionId) {
+        const session = sessions.value.get(event.sessionId)
+        if (session && session.runState !== 'idle') {
+          endToolExecution(event.sessionId, event.callId, event.name, event.ok, event.exitCode, event.result)
+        }
+      }
     })
     gatewayService.on('turn_end', (event) => {
-      if (isTurnEndEvent(event) && event.reason === 'complete') {
+      if (isTurnEndEvent(event) && event.reason === 'complete' && event.sessionId) {
         // assistant message naturally complete
       }
     })
-    gatewayService.on('done', () => {
-      const last = messages.value[messages.value.length - 1]
-      if (last && last.role === 'assistant') {
-        last.loading = false
-      }
-      runState.value = 'idle'
-    })
-    gatewayService.on('error', (event) => {
-      if (isErrorEvent(event)) {
-        if (!event.recoverable) {
-          const last = messages.value[messages.value.length - 1]
+    gatewayService.on('done', (event) => {
+      const sessionId = (event as { sessionId?: string }).sessionId
+      if (sessionId) {
+        const session = sessions.value.get(sessionId)
+        if (session) {
+          const last = session.messages[session.messages.length - 1]
           if (last && last.role === 'assistant') {
             last.loading = false
           }
-          runState.value = 'idle'
+          session.runState = 'idle'
         }
-        error.value = event.message
+      }
+    })
+    gatewayService.on('error', (event) => {
+      if (isErrorEvent(event)) {
+        const sessionId = (event as { sessionId?: string }).sessionId
+        if (sessionId) {
+          const session = sessions.value.get(sessionId)
+          if (session) {
+            if (!event.recoverable) {
+              const last = session.messages[session.messages.length - 1]
+              if (last && last.role === 'assistant') {
+                last.loading = false
+              }
+              session.runState = 'idle'
+            }
+            session.error = event.message
+          }
+        }
+      }
+    })
+    gatewayService.on('tool_approval_request', (event) => {
+      if (isToolApprovalRequestEvent(event) && event.sessionId) {
+        const session = sessions.value.get(event.sessionId)
+        if (session && session.runState !== 'idle') {
+          addPendingApproval(event.sessionId, {
+            callId: event.callId,
+            name: event.name,
+            arguments: event.arguments,
+          })
+        }
       }
     })
   }
 
   return {
+    sessions,
     messages,
     runState,
     isRunning,
     error,
+    pendingApprovals,
+    activeSessionId,
     reset,
+    setActiveSession,
     loadSession,
     sendMessage,
     stop,
     setupEventListeners,
+    sendApprovalResponse,
   }
 })
 
@@ -252,6 +453,14 @@ export function convertBackendMessages(msgs: BackendMessage[]): UiMessage[] {
       : typeof msg.additional_properties?.thinking === 'string'
         ? msg.additional_properties.thinking
         : undefined
+
+    let emittedThinking = false
+    const hasTextContent = msg.contents.some(isTextContent)
+    if (thinking && !textSegment && msg.role === 'assistant' && !hasTextContent) {
+      textSegment = { role: msg.role, content: '', thinking }
+      emittedThinking = true
+    }
+
     for (const content of msg.contents) {
       if (isTextContent(content)) {
         if (!textSegment) {
@@ -265,7 +474,6 @@ export function convertBackendMessages(msgs: BackendMessage[]): UiMessage[] {
       }
 
       if (isUsageContent(content)) {
-        // Usage blocks are for accounting only and should not be rendered.
         continue
       }
 
@@ -328,9 +536,7 @@ export function convertBackendMessages(msgs: BackendMessage[]): UiMessage[] {
       }
     }
 
-    // Ensure a message with only thinking (no text/tool) still surfaces the thinking block,
-    // but do not create empty user/tool bubbles.
-    if (thinking && !textSegment && msg.role === 'assistant') {
+    if (!emittedThinking && thinking && !textSegment && msg.role === 'assistant') {
       textSegment = { role: msg.role, content: '', thinking }
     }
     flushText()

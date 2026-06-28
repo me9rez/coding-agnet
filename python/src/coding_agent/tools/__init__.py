@@ -1,4 +1,4 @@
-"""Coding agent tools — bash, file read/write, search.
+"""Coding agent tools — file read/write/edit/search, shell commands, system utilities.
 
 All tools are ``FunctionTool`` instances wired by ``create_coding_tools()``.
 """
