@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_SKILL_DIRS: Sequence[str | Path] = [
     Path.cwd() / "skills",
     Path.home() / ".coding-agent" / "skills",
+    Path.home() / ".agent" / "skills",
 ]
 
 

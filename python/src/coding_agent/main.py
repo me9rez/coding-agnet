@@ -135,7 +135,7 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
     )
 
     client = _build_client(settings)
-    tools = create_coding_tools()
+    tools = create_coding_tools(approval_config=settings.tool_approval)
     skill_provider = create_skills_provider()
     try:
         mcp_tools = create_mcp_tools(settings)
@@ -150,6 +150,7 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
         BuildSystemPromptOptions(
             project_context=ctx,
             mcp_tools_prompt=mcp_tools_prompt,
+            tool_approval=settings.tool_approval,
         )
     )
 
@@ -289,7 +290,7 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
         from coding_agent.gateway.ws_server import WsGatewayServer
 
         server = WsGatewayServer(
-            tools=create_coding_tools(),
+            tools=create_coding_tools(approval_config=settings.tool_approval),
             settings=settings,
             port=ws_port,
             skill_provider=skill_provider,
@@ -302,7 +303,7 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
 
         server = GatewayServer(
             client=_build_client(settings),
-            tools=create_coding_tools(),
+            tools=create_coding_tools(approval_config=settings.tool_approval),
             transport=StdioTransport(),
             settings=settings,
             skill_provider=skill_provider,

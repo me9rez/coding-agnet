@@ -42,6 +42,10 @@ class ToolEventMiddleware(FunctionMiddleware):
     def __init__(self, emit: Callable[[AgentEvent], None]) -> None:
         self._emit = emit
 
+    def set_emit(self, emit: Callable[[AgentEvent], None]) -> None:
+        """Update the emit callback (e.g. to inject group-split logic)."""
+        self._emit = emit
+
     async def process(
         self,
         context: FunctionInvocationContext,
@@ -170,11 +174,14 @@ async def run_coding_agent(
     from agent_framework._types import normalize_tools
 
     _base_emit = on_event or _noop_emit
-    turn_thinking_parts: list[str] = []
+    turn_thinking_groups: list[list[str]] = [[]]
 
     def _emit(event: AgentEvent) -> None:
-        if isinstance(event, ThinkingDeltaEvent):
-            turn_thinking_parts.append(event.delta)
+        # Group splitting only — thinking deltas are appended by
+        # _process_agent_update via thinking_parts_out, so we must not
+        # duplicate them here.
+        if isinstance(event, ToolCallStartEvent):
+            turn_thinking_groups.append([])
         _base_emit(event)
 
     tool_list = list(tools) if tools else []
@@ -203,7 +210,7 @@ async def run_coding_agent(
 
         stream = agent.run(messages, stream=True, options=cast(ChatOptions, options))
         async for update in stream:
-            _process_agent_update(update, _emit, turn_thinking_parts)
+            _process_agent_update(update, _emit, turn_thinking_groups[-1])
 
         response: AgentResponse = await stream.get_final_response()
 
@@ -219,16 +226,21 @@ async def run_coding_agent(
         else:
             response.messages.append(Message(role="assistant", contents=[usage_content]))
 
-    # Persist any thinking collected this turn on the assistant message(s).
-    thinking_text = "".join(turn_thinking_parts)
-    if thinking_text:
-        for msg in response.messages:
-            if getattr(msg, "role", None) == "assistant":
-                additional = getattr(msg, "additional_properties", None)
-                if additional is None:
-                    additional = {}
-                    object.__setattr__(msg, "additional_properties", additional)
-                additional["thinking"] = thinking_text
+    # Persist thinking per assistant message so the loaded transcript preserves
+    # the same per-bubble reasoning that the live stream showed.  Each
+    # thinking_group maps 1-to-1 with the assistant messages in the response.
+    assistant_msgs = [m for m in response.messages if getattr(m, "role", None) == "assistant"]
+    for i, msg in enumerate(assistant_msgs):
+        if i >= len(turn_thinking_groups):
+            break
+        thinking_text = "".join(turn_thinking_groups[i])
+        if not thinking_text:
+            continue
+        additional = getattr(msg, "additional_properties", None)
+        if additional is None:
+            additional = {}
+            object.__setattr__(msg, "additional_properties", additional)
+        additional["thinking"] = thinking_text
 
     # Append assistant and tool messages to the transcript.
     for msg in response.messages:
@@ -300,6 +312,12 @@ def _extract_thinking(
     thinking_parts_out: list[str] | None,
 ) -> None:
     """Extract thinking/reasoning tokens from provider-specific raw data."""
+    # Agent-framework may wrap the underlying provider chunk in a ChatResponseUpdate
+    # and put the real raw chunk in raw_representation.
+    nested = getattr(raw, "raw_representation", None)
+    if nested is not None and nested is not raw:
+        raw = nested
+
     if isinstance(raw, dict):
         for choice in raw.get("choices", []):
             delta = choice.get("delta", {}) if isinstance(choice, dict) else {}

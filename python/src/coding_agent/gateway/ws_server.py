@@ -427,6 +427,7 @@ class WsGatewayServer:
             BuildSystemPromptOptions(
                 project_context=ctx,
                 mcp_tools_prompt=mcp_tools_prompt,
+                tool_approval=getattr(settings, "tool_approval", None),
             )
         )
 

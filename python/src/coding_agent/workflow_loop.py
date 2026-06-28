@@ -20,6 +20,7 @@ from __future__ import annotations
 import copy
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -33,6 +34,7 @@ from coding_agent.events import (
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolApprovalRequestEvent,
+    ToolCallStartEvent,
     TurnEndEvent,
     UsageEvent,
 )
@@ -113,6 +115,12 @@ def _extract_thinking(
     thinking_parts_out: list[str] | None,
 ) -> None:
     """Extract provider-specific reasoning tokens from raw data."""
+    # Agent-framework may wrap the underlying provider chunk in a ChatResponseUpdate
+    # and put the real raw chunk in raw_representation.
+    nested = getattr(raw, "raw_representation", None)
+    if nested is not None and nested is not raw:
+        raw = nested
+
     if isinstance(raw, dict):
         for choice in raw.get("choices", []):
             delta = choice.get("delta", {}) if isinstance(choice, dict) else {}
@@ -207,16 +215,45 @@ async def _run_single_agent_turn(
     messages: list[Message],
     options: dict[str, Any],
     emit: Callable[[AgentEvent], None],
-) -> tuple[AgentResponse, list[str]]:
-    """Run one agent turn, streaming events and returning the final response."""
-    turn_thinking_parts: list[str] = []
+    tool_event_middleware: ToolEventMiddleware | None = None,
+) -> tuple[AgentResponse, list[list[str]]]:
+    """Run one agent turn, streaming events and returning the final response.
+
+    Returns ``(response, thinking_groups)`` where *thinking_groups* is a
+    list-of-lists.  Each inner list holds the thinking deltas for the
+    corresponding assistant message in the response.  A new group is started
+    every time a ``ToolCallStartEvent`` is emitted (by the
+    ``ToolEventMiddleware``), matching the boundary between separate LLM
+    invocations within a single ``agent.run()`` call.
+    """
+    turn_thinking_groups: list[list[str]] = [[]]
+
+    # Wrap the emit so that ToolCallStartEvent (fired by the middleware on
+    # each function invocation) triggers a group split.  This is more
+    # reliable than inspecting ``update.contents`` for ``function_call``
+    # entries, which the agent framework does not include in stream updates.
+    def _emit_with_split(event: AgentEvent) -> None:
+        if isinstance(event, ToolCallStartEvent):
+            turn_thinking_groups.append([])
+        emit(event)
+
+    # Point the middleware at the split-aware emit so ToolCallStartEvent
+    # fired during tool execution also triggers a group boundary.
+    if tool_event_middleware is not None:
+        tool_event_middleware.set_emit(_emit_with_split)
+
     from agent_framework._types import ChatOptions
 
     stream = agent.run(messages, stream=True, options=cast(ChatOptions, options))
     async for update in stream:
-        _process_update(update, emit, turn_thinking_parts)
+        _process_update(update, _emit_with_split, turn_thinking_groups[-1])
     response: AgentResponse = await stream.get_final_response()
-    return response, turn_thinking_parts
+
+    # Restore the original emit so the next turn starts clean.
+    if tool_event_middleware is not None:
+        tool_event_middleware.set_emit(emit)
+
+    return response, turn_thinking_groups
 
 
 async def run_coding_workflow(
@@ -247,6 +284,75 @@ async def run_coding_workflow(
         mcp_tools=mcp_tools,
         approval_enabled=approval_enabled,
     )
+
+
+def _attach_thinking(
+    messages: list[Message],
+    thinking_groups: list[list[str]],
+) -> None:
+    """Persist collected thinking deltas on the corresponding assistant message.
+
+    Mirrors the behaviour of :func:`coding_agent.loop.run_coding_agent` so that
+    :func:`coding_agent.session.message_to_dict` will later write the
+    ``thinking`` field back out to the persisted JSONL session file.
+
+    A single ``agent.run()`` may yield multiple assistant messages (one per LLM
+    turn — e.g. a ``function_call`` turn followed by a post-tool text turn).
+    ``thinking_groups`` is a list-of-lists where each inner list contains the
+    thinking deltas emitted during the corresponding LLM turn.  Each group is
+    mapped to the assistant message at the same index so the loaded transcript
+    preserves the same per-bubble thinking that the live stream showed.
+    """
+    assistant_msgs = [m for m in messages if getattr(m, "role", None) == "assistant"]
+    for i, msg in enumerate(assistant_msgs):
+        if i >= len(thinking_groups):
+            break
+        thinking_text = "".join(thinking_groups[i])
+        if not thinking_text:
+            continue
+        additional = getattr(msg, "additional_properties", None)
+        if additional is None:
+            additional = {}
+            object.__setattr__(msg, "additional_properties", additional)
+        additional["thinking"] = thinking_text
+
+
+@asynccontextmanager
+async def _agent_or_fallback(
+    client: SupportsChatGetResponse,
+    instructions: str,
+    tools: list[Any],
+    context_providers: list[Any] | None,
+    middleware: list[Any],
+    *,
+    has_mcp: bool,
+    base_tools: list[Any] | None,
+    approval_enabled: bool,
+):
+    """Create an Agent, falling back to MCP-free tools if MCP servers fail."""
+    try:
+        async with Agent(
+            client=client,
+            instructions=instructions,
+            tools=tools,
+            context_providers=context_providers,
+            middleware=middleware,
+        ) as agent:
+            yield agent
+    except Exception as exc:
+        if has_mcp and "MCP" in str(exc):
+            logger.warning("MCP server connection failed, retrying without MCP tools: %s", exc)
+            fallback_tools = _prepare_tools(list(base_tools) if base_tools else [], approval_enabled)
+            async with Agent(
+                client=client,
+                instructions=instructions,
+                tools=fallback_tools,
+                context_providers=context_providers,
+                middleware=middleware,
+            ) as agent:
+                yield agent
+        else:
+            raise
 
 
 async def _run_workflow(
@@ -280,27 +386,31 @@ async def _run_workflow(
     tool_event_middleware = ToolEventMiddleware(emit)
 
     instructions = system_prompt or ""
-    instructions += (
-        "\n\n你是全栈编程助手。先简要分析需求。必要时调用工具完成代码或命令操作。"
-        "最后给出简短总结。涉及写入文件、执行 shell、修改文件前必须调用对应工具。"
-    )
+    conversation = list(messages)
 
-    async with Agent(
-        client=client,
-        instructions=instructions,
-        tools=prepared_tools,
-        context_providers=context_providers,
-        middleware=[tool_event_middleware],
+    # If Agent initialisation fails due to an MCP server connection error,
+    # strip MCP tools and retry so the session can still proceed.
+    async with _agent_or_fallback(
+        client,
+        instructions,
+        prepared_tools,
+        context_providers,
+        tool_event_middleware,
+        has_mcp=bool(mcp_tools),
+        base_tools=tools,
+        approval_enabled=approval_enabled,
     ) as agent:
-        conversation = list(messages)
-
         for _turn in range(max_turns):
-            response, _ = await _run_single_agent_turn(agent, conversation, options, emit)
+            response, turn_thinking_groups = await _run_single_agent_turn(
+                agent, conversation, options, emit, tool_event_middleware
+            )
+            _attach_thinking(response.messages, turn_thinking_groups)
 
             approval_requests = _collect_approval_requests(response.messages)
             if approval_requests:
                 # Keep the original assistant message with function_call(s) in the transcript.
                 cleaned_response_messages = _strip_approval_wrappers(response.messages)
+                _attach_thinking(cleaned_response_messages, turn_thinking_groups)
                 conversation.extend(cleaned_response_messages)
 
                 request = approval_requests[0]

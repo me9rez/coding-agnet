@@ -247,6 +247,7 @@ class GatewayServer:
             BuildSystemPromptOptions(
                 project_context=ctx,
                 mcp_tools_prompt=mcp_tools_prompt,
+                tool_approval=getattr(self._settings, "tool_approval", None),
             )
         )
         from coding_agent.workflow_loop import PendingApproval, WorkflowOutput, run_coding_workflow

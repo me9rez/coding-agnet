@@ -81,7 +81,13 @@ class Settings:
     max_turns: int = 25
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     workflow_loop: bool = True
-    tool_approval: dict[str, Any] = field(default_factory=lambda: {"enabled": True})
+    tool_approval: dict[str, Any] = field(
+        default_factory=lambda: {
+            "enabled": True,
+            "always_require": ["run_command", "write_file", "edit_file", "http_fetch"],
+            "never_require": [],
+        }
+    )
 
 
 def _default_settings() -> Settings:
