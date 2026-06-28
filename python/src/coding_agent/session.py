@@ -464,10 +464,9 @@ def dict_to_message(d: dict) -> object:
                 )
             )
         elif t == "usage":
-            from agent_framework._types import UsageDetails
-
-            details = c.get("usage_details") or d.get("usage") or {}
-            contents.append(Content(type="usage", usage_details=UsageDetails(**details)))
+            # Usage blocks are kept in storage for accounting but are not
+            # replayed to the model API on subsequent turns.
+            continue
     additional_properties = {}
     thinking = d.get("thinking")
     if thinking:

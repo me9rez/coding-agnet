@@ -212,6 +212,10 @@ function isFunctionResultContent(content: MessageContent): content is Extract<Me
   return content.type === 'function_result'
 }
 
+function isUsageContent(content: MessageContent): content is Extract<MessageContent, { type: 'usage' }> {
+  return content.type === 'usage'
+}
+
 interface BackendMessage {
   role: string
   contents: MessageContent[]
@@ -257,6 +261,11 @@ export function convertBackendMessages(msgs: BackendMessage[]): UiMessage[] {
           textSegment = { role: msg.role, content: '', thinking }
         }
         textSegment.content += content.text ?? ''
+        continue
+      }
+
+      if (isUsageContent(content)) {
+        // Usage blocks are for accounting only and should not be rendered.
         continue
       }
 

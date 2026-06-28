@@ -41,4 +41,21 @@ describe('convertBackendMessages', () => {
     expect(result).toHaveLength(1)
     expect(result[0]!.content).toBe('前半后半')
   })
+
+  it('skips usage content and avoids duplicate assistant bubbles', () => {
+    const msgs = [
+      {
+        role: 'assistant',
+        contents: [
+          { type: 'text' as const, text: '答案' },
+          { type: 'usage' as const, usage_details: { input_token_count: 1, output_token_count: 2, total_token_count: 3 } },
+        ],
+        thinking: '我先想想',
+      },
+    ]
+    const result = convertBackendMessages(msgs as any)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.content).toBe('答案')
+    expect(result[0]!.thinking).toBe('我先想想')
+  })
 })

@@ -429,8 +429,9 @@ class WsGatewayServer:
             self._emit(DoneEvent())
         finally:
             has_sys = messages and hasattr(messages[0], "role") and getattr(messages[0], "role", "") == "system"
-            session.messages = [message_to_dict(m) for m in (messages[1:] if has_sys else messages)]
+            message_dicts = [message_to_dict(m) for m in (messages[1:] if has_sys else messages)]
             session = end_session_run(session.id, error=error_occurred) or session
+            session.messages = message_dicts
             self._session = session
             save_session(session)
 

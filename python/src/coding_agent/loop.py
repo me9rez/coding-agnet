@@ -17,6 +17,8 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from agent_framework._types import Content, Message, UsageDetails
+
 from coding_agent.events import (
     AgentEvent,
     DoneEvent,
@@ -34,7 +36,7 @@ from coding_agent.events import (
 if TYPE_CHECKING:
     from agent_framework._clients import SupportsChatGetResponse
     from agent_framework._tools import FunctionTool
-    from agent_framework._types import ChatResponse, Content, Message
+    from agent_framework._types import ChatResponse
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +97,7 @@ async def run_coding_agent(
         turn += 1
         logger.debug("Turn %d/%d", turn, max_turns)
         turn_thinking_parts.clear()
+        turn_usage_details: list[dict[str, Any]] = []
 
         # ── 1. Call LLM with streaming ──────────────────────────────
         stream_result = client.get_response(
@@ -109,10 +112,21 @@ async def run_coding_agent(
             stream = stream_result
 
         async for update in stream:
-            _process_update(update, _emit)
+            _process_update(update, _emit, turn_usage_details)
 
         # ── 2. Get final response ────────────────────────────────────
         response: ChatResponse = await stream.get_final_response()
+
+        # Attach the full usage details to the assistant message so they are
+        # persisted in the session JSONL and replayed to the TUI.
+        if turn_usage_details:
+            usage_content = Content(type="usage", usage_details=UsageDetails(**turn_usage_details[-1]))
+            for msg in reversed(response.messages):
+                if getattr(msg, "role", None) == "assistant":
+                    msg.contents = [*(getattr(msg, "contents", None) or []), usage_content]
+                    break
+            else:
+                response.messages.append(Message(role="assistant", contents=[usage_content]))
 
         # Collect thinking from content blocks (e.g., Claude) in addition to streamed deltas.
         content_thinking_parts: list[str] = []
@@ -241,6 +255,7 @@ def _noop_emit(_event: AgentEvent) -> None:
 def _process_update(
     update: Any,
     emit: Callable[[AgentEvent], None],
+    usage_details_out: list[dict[str, Any]] | None = None,
 ) -> None:
     """Extract text/thinking/usage events from one ChatResponseUpdate chunk."""
     # 1. Check raw_representation for thinking deltas (Anthropic / DeepSeek)
@@ -262,6 +277,8 @@ def _process_update(
                 emit(ThinkingDeltaEvent(delta=thinking))
         elif ctype == "usage":
             details = getattr(c, "usage_details", None) or {}
+            if usage_details_out is not None:
+                usage_details_out.append(dict(details))
             emit(
                 UsageEvent(
                     input_tokens=details.get("input_token_count", 0) or 0,
