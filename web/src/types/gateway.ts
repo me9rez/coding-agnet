@@ -6,6 +6,7 @@ export interface GatewayRequest {
 
 export interface GatewayEvent {
   type: string
+  sessionId?: string
 }
 
 export interface TextDeltaEvent extends GatewayEvent {

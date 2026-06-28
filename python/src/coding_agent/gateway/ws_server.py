@@ -34,6 +34,13 @@ from coding_agent.framework_session import (
     get_or_create_framework_session,
     save_framework_session,
 )
+from coding_agent.mcp import (
+    get_connector,
+    install_connector,
+    list_connectors,
+    uninstall_connector,
+    update_connector_config,
+)
 from coding_agent.session import (
     create_session,
     delete_session,
@@ -48,6 +55,16 @@ from coding_agent.session import (
 from coding_agent.settings import Settings, _split_selected_model, build_client, model_config, thinking_level
 from coding_agent.settings import load as load_settings
 from coding_agent.settings import save as save_settings
+from coding_agent.skills import (
+    get_skill,
+    get_skill_file_content,
+    get_skill_files,
+    install_skill,
+    list_skills,
+    toggle_skill,
+    uninstall_skill,
+    update_skill,
+)
 from coding_agent.thinking import thinking_options_for_model
 from coding_agent.workflow_loop import PendingApproval, WorkflowOutput
 
@@ -63,6 +80,7 @@ def _session_info_to_dict(info: Any) -> dict[str, Any]:
         "title": info.title,
         "model": info.model,
         "modelProvider": info.model_provider,
+        "workspace": info.workspace,
         "status": info.status,
         "sessionStartedAt": info.session_started_at,
         "lastInteractionAt": info.last_interaction_at,
@@ -84,6 +102,7 @@ def _session_data_to_dict(session: Any) -> dict[str, Any]:
         "title": session.title,
         "model": session.model,
         "modelProvider": session.model_provider,
+        "workspace": session.workspace,
         "createdAt": session.created_at,
         "updatedAt": session.updated_at,
         "messages": session.messages,
@@ -203,7 +222,7 @@ class WsGatewayServer:
         self._port = port
         self._skill_provider = skill_provider
         self._mcp_tools = mcp_tools or []
-        self._current_task: asyncio.Task[None] | None = None
+        self._current_tasks: dict[str, asyncio.Task[None]] = {}
         self._session: Any = None
         self._ws: ServerConnection | None = None
         self._emit_tasks: list[asyncio.Task[None]] = []
@@ -226,8 +245,10 @@ class WsGatewayServer:
         path = ctx.cwd or str(Path.cwd().resolve())
         return {"name": Path(path).name, "path": path}
 
-    def _emit(self, event: AgentEvent) -> None:
+    def _emit(self, event: AgentEvent, session_id: str = "") -> None:
         obj = _serialize_event(event)
+        if session_id:
+            obj["sessionId"] = session_id
         if obj.get("type") not in ("text_delta", "thinking_delta", "tool_execution_delta"):
             fields = _summarize_event(obj)
             print(f"→ {obj.get('type', '?')} {fields}", file=sys.stderr, flush=True)
@@ -285,12 +306,15 @@ class WsGatewayServer:
                     text = params.get("text", "")
                     session_id = params.get("sessionId", "")
                     logger.info("← prompt (session=%s, text=%.80s)", session_id, text)
-                    if self._current_task and not self._current_task.done():
-                        self._current_task.cancel()
-                    self._current_task = asyncio.create_task(self._handle_prompt(text, session_id))
+                    self._current_tasks[session_id] = asyncio.create_task(
+                        self._handle_prompt(text, session_id)
+                    )
                 elif method == "cancel":
-                    if self._current_task and not self._current_task.done():
-                        self._current_task.cancel()
+                    session_id = params.get("sessionId", "")
+                    if session_id and session_id in self._current_tasks:
+                        task = self._current_tasks[session_id]
+                        if not task.done():
+                            task.cancel()
                 elif method == "listSessions":
                     try:
                         sessions = list_sessions()
@@ -302,7 +326,8 @@ class WsGatewayServer:
                     try:
                         title = params.get("title", "")
                         model = params.get("model", "")
-                        session = create_session(title=title, model=model)
+                        workspace = params.get("workspace", "")
+                        session = create_session(title=title, model=model, workspace=workspace)
                         save_session(session)
                         self._send_rpc_response(request_id, _session_data_to_dict(session))
                     except Exception as exc:
@@ -380,10 +405,245 @@ class WsGatewayServer:
                 elif method == "approval_response":
                     call_id = params.get("callId", "")
                     approved = bool(params.get("approved", False))
+                    session_id = params.get("sessionId", "")
                     if call_id in self._pending_approvals:
-                        self._current_task = asyncio.create_task(self._resume_approval(call_id, approved))
+                        task = asyncio.create_task(self._resume_approval(call_id, approved))
+                        if session_id:
+                            self._current_tasks[session_id] = task
                     else:
                         self._send_rpc_error(request_id, f"No pending approval: {call_id}")
+                elif method == "listSkills":
+                    try:
+                        skills = list_skills()
+                        self._send_rpc_response(request_id, {"skills": skills})
+                    except Exception as exc:
+                        logger.exception("listSkills failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "getSkill":
+                    try:
+                        name = params.get("name", "")
+                        skill = get_skill(name)
+                        if skill is None:
+                            self._send_rpc_error(request_id, f"Skill not found: {name}")
+                        else:
+                            self._send_rpc_response(request_id, skill)
+                    except Exception as exc:
+                        logger.exception("getSkill failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "getSkillFiles":
+                    try:
+                        name = params.get("name", "")
+                        files = get_skill_files(name)
+                        if files is None:
+                            self._send_rpc_error(request_id, f"Skill not found: {name}")
+                        else:
+                            self._send_rpc_response(request_id, {"files": files})
+                    except Exception as exc:
+                        logger.exception("getSkillFiles failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "getSkillFileContent":
+                    try:
+                        name = params.get("name", "")
+                        filePath = params.get("filePath", "")
+                        content = get_skill_file_content(name, filePath)
+                        if content is None:
+                            self._send_rpc_error(request_id, f"File not found: {filePath}")
+                        else:
+                            self._send_rpc_response(request_id, {"content": content})
+                    except Exception as exc:
+                        logger.exception("getSkillFileContent failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "installSkill":
+                    try:
+                        name = params.get("name", "")
+                        source_dir = params.get("sourceDir")
+                        skill = install_skill(name, source_dir)
+                        self._send_rpc_response(request_id, {"success": True, "skill": skill})
+                    except Exception as exc:
+                        logger.exception("installSkill failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "uninstallSkill":
+                    try:
+                        name = params.get("name", "")
+                        ok = uninstall_skill(name)
+                        self._send_rpc_response(request_id, {"success": ok})
+                    except Exception as exc:
+                        logger.exception("uninstallSkill failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "toggleSkill":
+                    try:
+                        name = params.get("name", "")
+                        enabled = params.get("enabled", True)
+                        ok = toggle_skill(name, enabled)
+                        self._send_rpc_response(request_id, {"success": ok})
+                    except Exception as exc:
+                        logger.exception("toggleSkill failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "updateSkill":
+                    try:
+                        name = params.get("name", "")
+                        content = params.get("content", "")
+                        ok = update_skill(name, content)
+                        self._send_rpc_response(request_id, {"success": ok})
+                    except Exception as exc:
+                        logger.exception("updateSkill failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "listConnectors":
+                    try:
+                        connectors = list_connectors()
+                        self._send_rpc_response(request_id, {"connectors": connectors})
+                    except Exception as exc:
+                        logger.exception("listConnectors failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "getConnector":
+                    try:
+                        name = params.get("name", "")
+                        connector = get_connector(name)
+                        if connector is None:
+                            self._send_rpc_error(request_id, f"Connector not found: {name}")
+                        else:
+                            self._send_rpc_response(request_id, connector)
+                    except Exception as exc:
+                        logger.exception("getConnector failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "installConnector":
+                    try:
+                        name = params.get("name", "")
+                        config = params.get("config")
+                        ok = install_connector(name, config)
+                        self._send_rpc_response(request_id, {"success": ok})
+                    except Exception as exc:
+                        logger.exception("installConnector failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "uninstallConnector":
+                    try:
+                        name = params.get("name", "")
+                        ok = uninstall_connector(name)
+                        self._send_rpc_response(request_id, {"success": ok})
+                    except Exception as exc:
+                        logger.exception("uninstallConnector failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "updateConnector":
+                    try:
+                        name = params.get("name", "")
+                        config = params.get("config", {})
+                        ok = update_connector_config(name, config)
+                        self._send_rpc_response(request_id, {"success": ok})
+                    except Exception as exc:
+                        logger.exception("updateConnector failed")
+                        self._send_rpc_error(request_id, str(exc))
+                # --- Automation: Scheduled Tasks ---
+                elif method == "listScheduledTasks":
+                    try:
+                        from coding_agent.automation import list_scheduled_tasks, task_to_dict
+
+                        tasks = list_scheduled_tasks()
+                        self._send_rpc_response(request_id, [task_to_dict(t) for t in tasks])
+                    except Exception as exc:
+                        logger.exception("listScheduledTasks failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "createScheduledTask":
+                    try:
+                        from coding_agent.automation import create_scheduled_task, task_to_dict
+
+                        task = create_scheduled_task(params)
+                        self._send_rpc_response(request_id, task_to_dict(task))
+                    except Exception as exc:
+                        logger.exception("createScheduledTask failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "updateScheduledTask":
+                    try:
+                        from coding_agent.automation import task_to_dict, update_scheduled_task
+
+                        task_id = params.get("id", "")
+                        task = update_scheduled_task(task_id, params)
+                        if task is None:
+                            self._send_rpc_error(request_id, f"Task not found: {task_id}")
+                        else:
+                            self._send_rpc_response(request_id, task_to_dict(task))
+                    except Exception as exc:
+                        logger.exception("updateScheduledTask failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "deleteScheduledTask":
+                    try:
+                        from coding_agent.automation import delete_scheduled_task
+
+                        task_id = params.get("id", "")
+                        ok = delete_scheduled_task(task_id)
+                        self._send_rpc_response(request_id, {"ok": ok})
+                    except Exception as exc:
+                        logger.exception("deleteScheduledTask failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "toggleScheduledTask":
+                    try:
+                        from coding_agent.automation import task_to_dict, toggle_scheduled_task
+
+                        task_id = params.get("id", "")
+                        enabled = params.get("enabled", True)
+                        task = toggle_scheduled_task(task_id, enabled)
+                        if task is None:
+                            self._send_rpc_error(request_id, f"Task not found: {task_id}")
+                        else:
+                            self._send_rpc_response(request_id, task_to_dict(task))
+                    except Exception as exc:
+                        logger.exception("toggleScheduledTask failed")
+                        self._send_rpc_error(request_id, str(exc))
+                # --- Automation: Event Listeners ---
+                elif method == "listEventListeners":
+                    try:
+                        from coding_agent.automation import list_event_listeners, listener_to_dict
+
+                        listeners = list_event_listeners()
+                        self._send_rpc_response(request_id, [listener_to_dict(listener) for listener in listeners])
+                    except Exception as exc:
+                        logger.exception("listEventListeners failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "createEventListener":
+                    try:
+                        from coding_agent.automation import create_event_listener, listener_to_dict
+
+                        listener = create_event_listener(params)
+                        self._send_rpc_response(request_id, listener_to_dict(listener))
+                    except Exception as exc:
+                        logger.exception("createEventListener failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "updateEventListener":
+                    try:
+                        from coding_agent.automation import listener_to_dict, update_event_listener
+
+                        listener_id = params.get("id", "")
+                        listener = update_event_listener(listener_id, params)
+                        if listener is None:
+                            self._send_rpc_error(request_id, f"Listener not found: {listener_id}")
+                        else:
+                            self._send_rpc_response(request_id, listener_to_dict(listener))
+                    except Exception as exc:
+                        logger.exception("updateEventListener failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "deleteEventListener":
+                    try:
+                        from coding_agent.automation import delete_event_listener
+
+                        listener_id = params.get("id", "")
+                        ok = delete_event_listener(listener_id)
+                        self._send_rpc_response(request_id, {"ok": ok})
+                    except Exception as exc:
+                        logger.exception("deleteEventListener failed")
+                        self._send_rpc_error(request_id, str(exc))
+                elif method == "toggleEventListener":
+                    try:
+                        from coding_agent.automation import listener_to_dict, toggle_event_listener
+
+                        listener_id = params.get("id", "")
+                        enabled = params.get("enabled", True)
+                        listener = toggle_event_listener(listener_id, enabled)
+                        if listener is None:
+                            self._send_rpc_error(request_id, f"Listener not found: {listener_id}")
+                        else:
+                            self._send_rpc_response(request_id, listener_to_dict(listener))
+                    except Exception as exc:
+                        logger.exception("toggleEventListener failed")
+                        self._send_rpc_error(request_id, str(exc))
         finally:
             self._connections.discard(ws)
             if self._ws is ws:
@@ -445,7 +705,7 @@ class WsGatewayServer:
                 session.total_tokens += event.total_tokens
                 session.cache_read_tokens += event.cache_read_tokens
                 session.reasoning_tokens += event.reasoning_tokens
-            self._emit(event)
+            self._emit(event, session_id=session.id)
 
         try:
             provider_id, model_id = _split_selected_model(session_model)
@@ -502,14 +762,17 @@ class WsGatewayServer:
                 )
         except asyncio.CancelledError:
             logger.info("Agent run cancelled")
-            self._emit(ErrorEvent(message="Agent run cancelled", recoverable=True))
-            self._emit(DoneEvent())
+            self._emit(ErrorEvent(message="Agent run cancelled", recoverable=True), session_id=session.id)
+            self._emit(DoneEvent(), session_id=session.id)
         except Exception as exc:
             error_occurred = True
             logger.exception("Agent loop failed")
-            self._emit(ErrorEvent(message=str(exc), recoverable=False))
-            self._emit(DoneEvent())
+            self._emit(ErrorEvent(message=str(exc), recoverable=False), session_id=session.id)
+            self._emit(DoneEvent(), session_id=session.id)
         finally:
+            # 清理任务引用
+            if session.id in self._current_tasks:
+                del self._current_tasks[session.id]
             if result is not None and isinstance(result, WorkflowOutput):
                 message_dicts = [message_to_dict(m) for m in result.messages]
             else:
@@ -539,7 +802,7 @@ class WsGatewayServer:
                 session.total_tokens += event.total_tokens
                 session.cache_read_tokens += event.cache_read_tokens
                 session.reasoning_tokens += event.reasoning_tokens
-            self._emit(event)
+            self._emit(event, session_id=session.id)
 
         try:
             result = await resume_coding_workflow(
@@ -573,15 +836,15 @@ class WsGatewayServer:
                 session.messages = [message_to_dict(m) for m in result.messages]
                 self._session = session
                 save_session(session)
-                self._emit(DoneEvent())
+                self._emit(DoneEvent(), session_id=session.id)
         except asyncio.CancelledError:
             logger.info("Approval resume cancelled")
-            self._emit(ErrorEvent(message="Agent run cancelled", recoverable=True))
-            self._emit(DoneEvent())
+            self._emit(ErrorEvent(message="Agent run cancelled", recoverable=True), session_id=session.id)
+            self._emit(DoneEvent(), session_id=session.id)
         except Exception as exc:
             logger.exception("Approval resume failed")
-            self._emit(ErrorEvent(message=str(exc), recoverable=False))
-            self._emit(DoneEvent())
+            self._emit(ErrorEvent(message=str(exc), recoverable=False), session_id=session.id)
+            self._emit(DoneEvent(), session_id=session.id)
         finally:
             save_session(session)
 

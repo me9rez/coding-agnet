@@ -10,8 +10,104 @@ import logging
 from typing import Any
 
 from coding_agent.settings import Settings
+from coding_agent.settings import load as load_settings
+from coding_agent.settings import save as save_settings
 
 logger = logging.getLogger(__name__)
+
+# Built-in connectors with descriptions
+BUILTIN_CONNECTORS: dict[str, dict[str, str]] = {
+    "brave-search": {
+        "description": "Brave Search API",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-brave-search",
+    },
+    "sqlite": {
+        "description": "SQLite database operations",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-sqlite /path/to/database.db",
+    },
+    "puppeteer": {
+        "description": "Browser automation",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-puppeteer",
+    },
+    "memory": {
+        "description": "Memory storage",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-memory",
+    },
+    "github": {
+        "description": "GitHub API integration",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-github",
+    },
+    "slack": {
+        "description": "Slack integration",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-slack",
+    },
+    "fetch": {
+        "description": "HTTP fetch",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-fetch",
+    },
+    "playwright": {
+        "description": "Browser automation",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-playwright",
+    },
+    "notion": {
+        "description": "Notion integration",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-notion",
+    },
+    "postgres": {
+        "description": "PostgreSQL database",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-postgres",
+    },
+    "docker": {
+        "description": "Docker management",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-docker",
+    },
+    "sentry": {
+        "description": "Sentry integration",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-sentry",
+    },
+    "linear": {
+        "description": "Linear project management",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-linear",
+    },
+    "chrome-devtools": {
+        "description": "Chrome DevTools",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @modelcontextprotocol/server-chrome-devtools",
+    },
+    "abu-browser-bridge": {
+        "description": "Abu browser bridge",
+        "type": "stdio",
+        "command": "npx",
+        "args": "-y @anthropic/abu-browser-bridge",
+    },
+}
 
 
 def format_mcp_tools_for_prompt(tools: list[Any]) -> str:
@@ -123,3 +219,157 @@ def create_mcp_tools(settings: Settings) -> list[Any]:
             logger.warning("Failed to create MCP tool %s: %s", name, exc)
 
     return tools
+
+
+def list_connectors() -> list[dict[str, Any]]:
+    """List all available connectors (builtin + configured).
+
+    Returns
+    -------
+    List of connector info dicts.
+    """
+    settings = load_settings()
+    configured = getattr(settings, "mcp_servers", None) or {}
+    connectors: list[dict[str, Any]] = []
+
+    # Add built-in connectors
+    for name, info in BUILTIN_CONNECTORS.items():
+        connectors.append({
+            "name": name,
+            "description": info["description"],
+            "installed": name in configured,
+            "type": "builtin",
+        })
+
+    # Add custom configured connectors (not in builtin list)
+    for name, config in configured.items():
+        if name not in BUILTIN_CONNECTORS:
+            connectors.append({
+                "name": name,
+                "description": config.get("description", f"MCP server: {name}"),
+                "installed": True,
+                "type": "custom",
+            })
+
+    return connectors
+
+
+def get_connector(name: str) -> dict[str, Any] | None:
+    """Get connector detail including config.
+
+    Parameters
+    ----------
+    name:
+        Connector name.
+
+    Returns
+    -------
+    Connector info dict with config, or None if not found.
+    """
+    settings = load_settings()
+    configured = getattr(settings, "mcp_servers", None) or {}
+
+    # Check builtin first
+    if name in BUILTIN_CONNECTORS:
+        info = BUILTIN_CONNECTORS[name]
+        config = configured.get(name, {
+            "type": info["type"],
+            "command": info.get("command", ""),
+            "args": info.get("args", "").split() if info.get("args") else [],
+        })
+        return {
+            "name": name,
+            "description": info["description"],
+            "installed": name in configured,
+            "type": "builtin",
+            "config": config,
+        }
+
+    # Check custom
+    if name in configured:
+        config = configured[name]
+        return {
+            "name": name,
+            "description": config.get("description", f"MCP server: {name}"),
+            "installed": True,
+            "type": "custom",
+            "config": config,
+        }
+
+    return None
+
+
+def install_connector(name: str, config: dict[str, Any] | None = None) -> bool:
+    """Install a connector by adding to settings.
+
+    Parameters
+    ----------
+    name:
+        Connector name.
+    config:
+        Custom config. If None, uses builtin default.
+
+    Returns
+    -------
+    True if installed successfully.
+    """
+    settings = load_settings()
+    if settings.mcp_servers is None:
+        settings.mcp_servers = {}
+
+    if config is None and name in BUILTIN_CONNECTORS:
+        builtin = BUILTIN_CONNECTORS[name]
+        config = {
+            "type": builtin.get("type", "stdio"),
+            "command": builtin.get("command", ""),
+            "args": builtin.get("args", "").split() if builtin.get("args") else [],
+        }
+    elif config is None:
+        return False
+
+    settings.mcp_servers[name] = config
+    save_settings(settings)
+    return True
+
+
+def uninstall_connector(name: str) -> bool:
+    """Uninstall a connector by removing from settings.
+
+    Parameters
+    ----------
+    name:
+        Connector name.
+
+    Returns
+    -------
+    True if uninstalled, False if not found.
+    """
+    settings = load_settings()
+    if settings.mcp_servers and name in settings.mcp_servers:
+        del settings.mcp_servers[name]
+        save_settings(settings)
+        return True
+    return False
+
+
+def update_connector_config(name: str, config: dict[str, Any]) -> bool:
+    """Update a connector's configuration.
+
+    Parameters
+    ----------
+    name:
+        Connector name.
+    config:
+        New configuration.
+
+    Returns
+    -------
+    True if updated, False if not found.
+    """
+    settings = load_settings()
+    if settings.mcp_servers is None:
+        settings.mcp_servers = {}
+
+    settings.mcp_servers[name] = config
+    save_settings(settings)
+    return True

@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from agent_framework._middleware import FunctionInvocationContext
     from agent_framework._tools import FunctionTool
+
+from agent_framework._middleware import FunctionInvocationContext
 
 ApprovalMode = Literal["always_require", "never_require"]
 

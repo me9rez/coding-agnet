@@ -154,8 +154,8 @@ export class GatewayService {
     )
   }
 
-  cancel(): void {
-    this.send(JSON.stringify({ method: 'cancel', params: {} }))
+  cancel(sessionId?: string): void {
+    this.send(JSON.stringify({ method: 'cancel', params: { sessionId } }))
   }
 
   close(): void {

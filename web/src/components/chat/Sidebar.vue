@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import {
+  ChevronDown,
   Clock,
   Folder,
+  FolderOpen,
+  Layout,
   HelpCircle,
   Loader2,
   Plus,
@@ -11,13 +14,22 @@ import {
   Wrench,
   Zap,
 } from '@lucide/vue'
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { gatewayService } from '@/services/gateway'
+import { useChatStore } from '@/stores/chat'
 import { useSessionsStore } from '@/stores/sessions'
+import { useWorkspaceStore } from '@/stores/workspace'
 
+const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
+const workspaceStore = useWorkspaceStore()
 const router = useRouter()
+
+function isSessionRunning(sessionId: string): boolean {
+  const session = chatStore.sessions.get(sessionId)
+  return session?.runState === 'running' || session?.runState === 'waiting_approval'
+}
 
 let unsubscribe: (() => void) | null = null
 
@@ -25,6 +37,7 @@ const editingId = ref<string | null>(null)
 const editingTitle = ref('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
 const creating = ref(false)
+const projectExpanded = ref(true)
 
 const contextMenu = ref<{
   show: boolean
@@ -51,11 +64,28 @@ onUnmounted(() => {
   window.removeEventListener('click', closeContextMenu)
 })
 
-async function handleNewChat() {
+const workspaceSessions = computed(() => {
+  const ws = workspaceStore.workspace?.name || ''
+  return sessionsStore.sessions.filter((s) => s.workspace === ws)
+})
+
+const recentSessions = computed(() => {
+  const ws = workspaceStore.workspace?.name || ''
+  return sessionsStore.sessions
+    .filter((s) => !s.workspace || s.workspace !== ws)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+})
+
+function handleGoHome() {
+  router.push({ name: 'chat-home' })
+}
+
+async function handleNewSessionInProject() {
   if (creating.value) return
   creating.value = true
   try {
-    const session = await sessionsStore.createSession('新对话')
+    const ws = workspaceStore.workspace?.name || ''
+    const session = await sessionsStore.createSession('新对话', '', ws)
     if (session) {
       router.push({ name: 'chat-session', params: { sessionId: session.id } })
     }
@@ -100,7 +130,11 @@ async function handleMenuDelete(event: MouseEvent) {
   const id = contextMenu.value.sessionId
   closeContextMenu()
   if (id) {
+    const isCurrent = sessionsStore.currentSessionId === id
     await sessionsStore.deleteSession(id)
+    if (isCurrent) {
+      router.push({ name: 'chat-home' })
+    }
   }
 }
 
@@ -137,88 +171,86 @@ function handleRenameKeydown(sessionId: string, event: KeyboardEvent) {
     cancelRename()
   }
 }
-
-function formatTime(iso: string) {
-  const date = new Date(iso)
-  return date.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
 </script>
 
 <template>
   <aside class="h-full flex flex-col bg-[var(--bg-page)]">
     <div class="p-3">
       <button
-        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm font-medium hover:bg-[var(--bg-muted)] transition shadow-[var(--shadow)] disabled:opacity-60"
-        :disabled="creating"
-        @click="handleNewChat"
+        class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm font-medium hover:bg-[var(--bg-muted)] transition shadow-[var(--shadow)]"
+        @click="handleGoHome"
       >
-        <Loader2 v-if="creating" class="w-4 h-4 animate-spin" />
-        <Plus v-else class="w-4 h-4" />
+        <Plus class="w-4 h-4" />
         <span>新建任务</span>
       </button>
     </div>
 
     <nav class="px-3 space-y-1">
-      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
+      <RouterLink
+        to="/toolbox"
+        class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition"
+      >
         <Wrench class="w-4 h-4" />
         <span>工具箱</span>
-      </a>
-      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
+      </RouterLink>
+      <RouterLink to="/automation" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
         <Zap class="w-4 h-4" />
         <span>自动化</span>
-      </a>
+      </RouterLink>
     </nav>
 
     <div class="px-3 py-2">
-      <div class="px-2 py-2 text-xs font-medium text-[var(--text-subtle)]">
-        项目
+      <div class="flex items-center gap-1.5 px-2 py-2 text-xs font-bold text-[var(--text-subtle)]">
+        <Layout class="w-3.5 h-3.5" />
+        <span>项目</span>
       </div>
-      <a href="#" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
+      <button
+        class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition"
+        @click="projectExpanded = !projectExpanded"
+      >
+        <ChevronDown class="w-3.5 h-3.5 transition-transform" :class="projectExpanded ? '' : '-rotate-90'" />
         <Folder class="w-4 h-4" />
-        <span>cowork</span>
-      </a>
+        <span class="flex-1 text-left">{{ workspaceStore.workspace?.name || '未指定项目' }}</span>
+        <span
+          class="p-0.5 rounded hover:bg-[var(--border)] transition"
+          title="新建会话"
+          @click.stop="handleNewSessionInProject"
+        >
+          <Plus class="w-3.5 h-3.5" />
+        </span>
+      </button>
     </div>
 
-    <div class="flex-1 overflow-y-auto px-3 py-2">
-      <div class="px-2 py-2 text-xs font-medium text-[var(--text-subtle)] flex items-center gap-1">
-        <Clock class="w-3.5 h-3.5" />
-        <span>最近</span>
-      </div>
-
-      <div v-if="sessionsStore.loading" class="px-3 py-4 text-sm text-[var(--text-muted)]">
-        加载中…
-      </div>
-      <div
-        v-else-if="sessionsStore.sessions.length === 0"
-        class="px-3 py-4 text-sm text-[var(--text-muted)]"
-      >
-        暂无会话
-      </div>
-      <div
-        v-if="sessionsStore.error"
-        class="mx-3 mb-2 px-3 py-2 text-xs text-red-600 bg-red-50 rounded-lg border border-red-100"
-      >
-        {{ sessionsStore.error }}
-      </div>
-      <ul v-else class="space-y-1">
-        <li
-          v-for="session in sessionsStore.sessions"
-          :key="session.id"
+    <div v-show="projectExpanded" class="flex-1 overflow-y-auto px-3 pb-2">
+      <div class="ml-5 space-y-0.5">
+        <div v-if="sessionsStore.loading" class="px-3 py-4 text-sm text-[var(--text-muted)]">
+          加载中…
+        </div>
+        <div
+          v-else-if="workspaceSessions.length === 0"
+          class="px-3 py-3 text-sm text-[var(--text-muted)]"
         >
+          暂无会话
+        </div>
+        <div
+          v-if="sessionsStore.error"
+          class="mx-3 mb-2 px-3 py-2 text-xs text-red-600 bg-red-50 rounded-lg border border-red-100"
+        >
+          {{ sessionsStore.error }}
+        </div>
+        <template v-else>
           <RouterLink
+            v-for="session in workspaceSessions"
+            :key="session.id"
             :to="{ name: 'chat-session', params: { sessionId: session.id } }"
-            class="group relative flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer transition"
+            class="group relative flex items-center justify-between px-3 py-1.5 rounded-lg cursor-pointer text-sm transition"
             :class="{
-              'bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow)]': sessionsStore.currentSessionId === session.id,
-              'hover:bg-[var(--bg-muted)]': sessionsStore.currentSessionId !== session.id,
+              'bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow)] text-[var(--text)] font-medium': sessionsStore.currentSessionId === session.id,
+              'text-[var(--text-muted)] hover:bg-[var(--bg-muted)]': sessionsStore.currentSessionId !== session.id,
             }"
             @contextmenu="openContextMenu(session.id, $event)"
           >
-            <div
-              v-if="sessionsStore.currentSessionId === session.id"
-              class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-full bg-[var(--text)]"
-            />
-            <div class="min-w-0 flex-1 pl-1">
+            <div class="min-w-0 flex-1">
               <div v-if="editingId === session.id" class="w-full">
                 <input
                   ref="renameInputRef"
@@ -230,22 +262,53 @@ function formatTime(iso: string) {
                   @click.stop
                 >
               </div>
-              <template v-else>
-                <div
-                  class="truncate text-sm font-medium"
-                  @dblclick="startRename(session, $event)"
-                >
-                  {{ session.title || '未命名会话' }}
-                </div>
-                <div class="text-xs text-[var(--text-subtle)]">
-                  {{ formatTime(session.updatedAt) }}
-                </div>
-              </template>
+              <div
+                v-else
+                class="flex items-center gap-1.5"
+                @dblclick="startRename(session, $event)"
+              >
+                <Loader2
+                  v-if="isSessionRunning(session.id)"
+                  class="w-3 h-3 animate-spin text-[var(--text-muted)] shrink-0"
+                />
+                <span class="truncate">{{ session.title || '未命名会话' }}</span>
+              </div>
             </div>
           </RouterLink>
-        </li>
-      </ul>
+        </template>
+      </div>
     </div>
+
+    <!-- 最近会话 -->
+    <div v-if="recentSessions.length > 0" class="px-3 py-2">
+      <div class="flex items-center gap-1.5 px-2 py-2 text-xs font-bold text-[var(--text-subtle)]">
+        <Clock class="w-3.5 h-3.5" />
+        <span>最近</span>
+      </div>
+      <div class="space-y-0.5">
+        <RouterLink
+          v-for="session in recentSessions"
+          :key="session.id"
+          :to="{ name: 'chat-session', params: { sessionId: session.id } }"
+          class="group flex items-center px-3 py-1.5 rounded-lg text-sm cursor-pointer transition"
+          :class="{
+            'bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow)] text-[var(--text)]': sessionsStore.currentSessionId === session.id,
+            'text-[var(--text-muted)] hover:bg-[var(--bg-muted)]': sessionsStore.currentSessionId !== session.id,
+          }"
+          @contextmenu="openContextMenu(session.id, $event)"
+        >
+          <div class="flex items-center gap-1.5 min-w-0 flex-1">
+            <Loader2
+              v-if="isSessionRunning(session.id)"
+              class="w-3 h-3 animate-spin text-[var(--text-muted)] shrink-0"
+            />
+            <span class="truncate">{{ session.title || '未命名会话' }}</span>
+          </div>
+        </RouterLink>
+      </div>
+    </div>
+
+    <div v-show="!projectExpanded" class="flex-1" />
 
     <div class="p-3 border-t border-[var(--border)] flex items-center justify-between">
       <button class="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">

@@ -27,6 +27,23 @@ const router = createRouter({
       ],
     },
     {
+      path: '/toolbox',
+      component: () => import('../views/toolbox/ToolboxLayout.vue'),
+      redirect: '/toolbox/skills',
+      children: [
+        {
+          path: 'skills',
+          name: 'toolbox-skills',
+          component: () => import('../views/toolbox/SkillsView.vue'),
+        },
+        {
+          path: 'connectors',
+          name: 'toolbox-connectors',
+          component: () => import('../views/toolbox/ConnectorsView.vue'),
+        },
+      ],
+    },
+    {
       path: '/settings',
       component: SettingsLayout,
       redirect: '/settings/usage',
@@ -80,6 +97,23 @@ const router = createRouter({
           path: 'version',
           name: 'settings-version',
           component: () => import('../views/settings/SettingsVersionView.vue'),
+        },
+      ],
+    },
+    {
+      path: '/automation',
+      component: () => import('../views/automation/AutomationLayout.vue'),
+      redirect: '/automation/tasks',
+      children: [
+        {
+          path: 'tasks',
+          name: 'automation-tasks',
+          component: () => import('../views/automation/ScheduledTasksView.vue'),
+        },
+        {
+          path: 'listeners',
+          name: 'automation-listeners',
+          component: () => import('../views/automation/EventListenersView.vue'),
         },
       ],
     },

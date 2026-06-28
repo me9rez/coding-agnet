@@ -31,6 +31,7 @@ class SessionInfo:
     title: str = ""
     model: str = ""
     model_provider: str = ""
+    workspace: str = ""
     status: str = "idle"
     session_file: str = ""
     session_started_at: str = ""
@@ -57,6 +58,7 @@ class SessionData:
     updated_at: str = ""
     model: str = ""
     model_provider: str = ""
+    workspace: str = ""
     status: str = "idle"
     session_file: str = ""
     session_started_at: str = ""
@@ -111,6 +113,7 @@ def _load_index() -> dict[str, SessionInfo]:
                 title=info.get("title", ""),
                 model=info.get("model", ""),
                 model_provider=info.get("model_provider", ""),
+                workspace=info.get("workspace", ""),
                 status=info.get("status", "idle"),
                 session_file=info.get("session_file", ""),
                 session_started_at=info.get("session_started_at", ""),
@@ -141,6 +144,7 @@ def _info_to_dict(info: SessionInfo) -> dict[str, Any]:
         "title": info.title,
         "model": info.model,
         "model_provider": info.model_provider,
+        "workspace": info.workspace,
         "status": info.status,
         "session_file": info.session_file,
         "session_started_at": info.session_started_at,
@@ -171,7 +175,7 @@ def list_sessions() -> list[SessionInfo]:
     return sessions
 
 
-def create_session(title: str = "", model: str = "") -> SessionData:
+def create_session(title: str = "", model: str = "", workspace: str = "") -> SessionData:
     """Create a new empty session."""
     now = _now()
     session_id = uuid.uuid4().hex[:12]
@@ -181,6 +185,7 @@ def create_session(title: str = "", model: str = "") -> SessionData:
         title=title,
         model=model,
         model_provider=provider_id,
+        workspace=workspace,
         created_at=now,
         updated_at=now,
         session_file=str(_session_path(session_id)),
@@ -242,6 +247,7 @@ def save_session(session: SessionData) -> None:
         title=session.title,
         model=session.model,
         model_provider=session.model_provider,
+        workspace=session.workspace,
         status=session.status,
         session_file=session.session_file or str(path),
         session_started_at=session_started_at,
@@ -286,6 +292,7 @@ def load_session(session_id: str) -> SessionData | None:
         title=info.title,
         model=info.model,
         model_provider=info.model_provider,
+        workspace=info.workspace,
         status=info.status,
         session_file=info.session_file or str(path),
         session_started_at=info.session_started_at,

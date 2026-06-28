@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Bot } from '@lucide/vue'
-import { computed } from 'vue'
+import { Bot, Copy, Edit, RefreshCw, ThumbsDown, ThumbsUp, Trash2 } from '@lucide/vue'
+import { computed, ref } from 'vue'
 import ToolCallBlock from '@/components/chat/ToolCallBlock.vue'
 import type { UiMessage } from '@/types/session'
 import { renderMarkdown } from '@/utils/markdown'
@@ -9,13 +9,52 @@ const props = defineProps<{
   message: UiMessage
 }>()
 
+const emit = defineEmits<{
+  copy: [content: string]
+  edit: [message: UiMessage]
+  delete: [message: UiMessage]
+  regenerate: [message: UiMessage]
+}>()
+
 const renderedContent = computed(() => renderMarkdown(props.message.content))
+const showActions = ref(false)
+
+function handleCopy() {
+  emit('copy', props.message.content)
+}
+
+function handleEdit() {
+  emit('edit', props.message)
+}
+
+function handleDelete() {
+  emit('delete', props.message)
+}
+
+function handleRegenerate() {
+  emit('regenerate', props.message)
+}
+
+function formatTime(timestamp?: number) {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diff = now.getTime() - date.getTime()
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+
+  if (days > 0) {
+    return `昨天 ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+  }
+  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`
+}
 </script>
 
 <template>
   <div
     class="flex gap-3"
     :class="message.role === 'user' ? 'justify-end' : 'justify-start'"
+    @mouseenter="showActions = true"
+    @mouseleave="showActions = false"
   >
     <div
       v-if="message.role !== 'user'"
@@ -27,7 +66,7 @@ const renderedContent = computed(() => renderMarkdown(props.message.content))
     <div class="max-w-[85%] space-y-2">
       <div
         v-if="message.role === 'user' && message.content.trim()"
-        class="px-4 py-2.5 rounded-2xl rounded-tr-sm bg-[var(--text)] text-[var(--bg-card)] text-sm shadow-[var(--shadow)]"
+        class="px-4 py-2.5 rounded-2xl rounded-br-sm bg-[var(--text)] text-[var(--bg-card)] text-sm shadow-[var(--shadow)]"
       >
         {{ message.content }}
       </div>
@@ -70,6 +109,76 @@ const renderedContent = computed(() => renderMarkdown(props.message.content))
           class="px-4 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm shadow-[var(--shadow)] prose prose-neutral max-w-none"
           v-html="renderedContent"
         />
+      </div>
+
+      <div
+        v-if="message.role === 'user' && message.content.trim()"
+        class="flex items-center gap-1 opacity-0 transition-opacity"
+        :class="{ 'opacity-100': showActions }"
+      >
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="复制"
+          @click="handleCopy"
+        >
+          <Copy class="w-3.5 h-3.5" />
+        </button>
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="编辑"
+          @click="handleEdit"
+        >
+          <Edit class="w-3.5 h-3.5" />
+        </button>
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="删除"
+          @click="handleDelete"
+        >
+          <Trash2 class="w-3.5 h-3.5" />
+        </button>
+        <span class="text-xs text-[var(--text-subtle)] ml-1">{{ formatTime(message.timestamp) }}</span>
+      </div>
+
+      <div
+        v-if="message.role === 'assistant' && message.content.trim() && !message.loading"
+        class="flex items-center gap-1 opacity-0 transition-opacity"
+        :class="{ 'opacity-100': showActions }"
+      >
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="复制"
+          @click="handleCopy"
+        >
+          <Copy class="w-3.5 h-3.5" />
+        </button>
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="重新生成"
+          @click="handleRegenerate"
+        >
+          <RefreshCw class="w-3.5 h-3.5" />
+        </button>
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="点赞"
+        >
+          <ThumbsUp class="w-3.5 h-3.5" />
+        </button>
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="点踩"
+        >
+          <ThumbsDown class="w-3.5 h-3.5" />
+        </button>
+        <button
+          class="p-1.5 rounded-lg text-[var(--text-subtle)] hover:bg-[var(--bg-muted)] hover:text-[var(--text)] transition"
+          title="删除"
+          @click="handleDelete"
+        >
+          <Trash2 class="w-3.5 h-3.5" />
+        </button>
+        <span class="text-xs text-[var(--text-subtle)] ml-1">{{ formatTime(message.timestamp) }}</span>
       </div>
     </div>
   </div>
