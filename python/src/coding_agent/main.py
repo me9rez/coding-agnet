@@ -18,9 +18,9 @@ from pathlib import Path
 from coding_agent.settings import (
     Settings,
     _split_selected_model,
-    resolve_api_key,
-    selected_model_config,
-    selected_thinking_level,
+    build_client,
+    model_config,
+    thinking_level,
 )
 from coding_agent.settings import load as load_settings
 from coding_agent.tools.coding_tools import create_coding_tools
@@ -54,7 +54,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--thinking-level", default=None, help="Thinking level: off/low/medium/high")
     parser.add_argument("--ws-port", type=int, default=None, help="WebSocket port (WS mode instead of stdio)")
     parser.add_argument("--web", action="store_true", help="Serve the web frontend static files")
-    parser.add_argument("--web-port", type=int, default=8080, help="HTTP port for the web static server")
+    parser.add_argument("--web-port", type=int, default=8766, help="HTTP port for the web static server")
     parser.add_argument("--web-root", default=_default_web_root(), help="Directory to serve as the web frontend")
     return parser.parse_args(argv)
 
@@ -104,64 +104,17 @@ def _merge_settings(args: argparse.Namespace) -> Settings:
     """Load settings file, then apply CLI overrides."""
     s = load_settings()
     if args.model:
-        s.selected_model = args.model
+        s.primary_model = args.model
     if args.base_url:
-        provider_id, _ = _split_selected_model(s.selected_model)
+        provider_id, _ = _split_selected_model(s.primary_model)
         if provider_id in s.providers:
             s.providers[provider_id]["baseUrl"] = args.base_url
     return s
 
 
-def _build_client(settings: Settings) -> object:
+def _build_client(settings: Settings, model: str | None = None) -> object:
     """Create the LLM client from the selected provider/model."""
-    provider_id, model_id = _split_selected_model(settings.selected_model)
-    provider = settings.providers.get(provider_id, {})
-    base_url = provider.get("baseUrl", "")
-    api_key = resolve_api_key(settings)
-    if api_key:
-        from agent_framework_openai._chat_completion_client import RawOpenAIChatCompletionClient
-
-        logger.info(
-            "Client: provider=%s model=%s base_url=%s",
-            provider_id,
-            model_id,
-            base_url,
-        )
-        return RawOpenAIChatCompletionClient(
-            model=model_id,
-            base_url=base_url,
-            api_key=api_key,
-        )
-
-    logger.warning("No API key found, using fake client")
-    return _FakeClient()
-
-
-# ── Fake client for testing without API keys ────────────────────
-
-
-class _FakeClient:
-    """Minimal fake for testing the event pipeline without a real LLM."""
-
-    async def get_response(self, messages: list[object], *, stream: bool = True, options: object = None) -> object:
-        from agent_framework._types import ChatResponse, ChatResponseUpdate, Content, Message, ResponseStream
-
-        if stream:
-
-            async def _stream():
-                yield ChatResponseUpdate(contents=[Content(type="text", text="Hello from fake agent! ")])
-                yield ChatResponseUpdate(contents=[Content(type="text", text="No real API key configured.")])
-                yield ChatResponseUpdate(finish_reason="stop")
-
-            async def _finalizer(updates):
-                texts = [u.text for u in updates if u.text]
-                return ChatResponse(messages=[Message(role="assistant", contents=texts)], finish_reason="stop")
-
-            return ResponseStream(_stream(), finalizer=_finalizer)
-
-        return ChatResponse(
-            messages=[Message(role="assistant", contents=["Hello from fake client!"])], finish_reason="stop"
-        )
+    return build_client(settings, model)
 
 
 async def _run_test_mode(prompt: str, settings: Settings) -> None:
@@ -193,8 +146,8 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
         print(line, file=sys.stderr, flush=True)
 
     print(f"User: {prompt}", file=sys.stderr)
-    model_cfg = selected_model_config(settings)
-    thinking_level = selected_thinking_level(settings)
+    model_cfg = model_config(settings)
+    lvl = thinking_level(settings)
     max_tok = model_cfg.get("contextWindow") if model_cfg else None
     await run_coding_agent(
         client=client,  # type: ignore[arg-type]
@@ -202,7 +155,7 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
         tools=tools,
         on_event=on_event,
         system_prompt=sys_prompt,
-        thinking_level=thinking_level,
+        thinking_level=lvl,
         compaction_max_tokens=max_tok,
     )
 
@@ -245,7 +198,6 @@ async def _async_main(settings: Settings, ws_port: int | None = None) -> None:
         from coding_agent.gateway.ws_server import WsGatewayServer
 
         server = WsGatewayServer(
-            client=_build_client(settings),
             tools=create_coding_tools(),
             settings=settings,
             port=ws_port,

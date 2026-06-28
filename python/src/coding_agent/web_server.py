@@ -53,7 +53,7 @@ class _StaticHandler(SimpleHTTPRequestHandler):
         return translated
 
 
-def run_static_server(root: str, host: str = "127.0.0.1", port: int = 8080) -> threading.Thread:
+def run_static_server(root: str, host: str = "127.0.0.1", port: int = 8766) -> threading.Thread:
     """Start a static file server in a daemon thread.
 
     Args:

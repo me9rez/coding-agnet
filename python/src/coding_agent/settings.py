@@ -3,7 +3,7 @@
 Configuration now follows a provider/model layout similar to openclaw.json:
 
     {
-      "selectedModel": "deepseek/deepseek-v4-flash",
+      "primaryModel": "deepseek/deepseek-v4-flash",
       "providers": {
         "deepseek": {
           "api": "openai-completions",
@@ -76,7 +76,7 @@ def _default_providers() -> dict[str, Any]:
 
 @dataclass
 class Settings:
-    selected_model: str = "deepseek/deepseek-v4-flash"
+    primary_model: str = "deepseek/deepseek-v4-flash"
     providers: dict[str, Any] = field(default_factory=_default_providers)
     max_turns: int = 25
 
@@ -113,17 +113,22 @@ def load() -> Settings:
         migrated = False
 
         # New format
+        if "primaryModel" in data:
+            s.primary_model = data["primaryModel"]
+        if "primary_model" in data:
+            s.primary_model = data["primary_model"]
+        # Keep backward compatibility during transition
         if "selectedModel" in data:
-            s.selected_model = data["selectedModel"]
+            s.primary_model = data["selectedModel"]
         if "selected_model" in data:
-            s.selected_model = data["selected_model"]
+            s.primary_model = data["selected_model"]
         if "providers" in data:
             s.providers = data["providers"]
 
         # Legacy format migration
         if "providers" not in data and any(k in data for k in ("model", "base_url", "api_key")):
             provider_id = _infer_provider(data.get("base_url", ""))
-            model_id = data.get("model", _split_selected_model(s.selected_model)[1])
+            model_id = data.get("model", _split_selected_model(s.primary_model)[1])
             old_thinking = data.get("thinking_level", "")
             thinking_levels: list[str] = []
             if old_thinking and old_thinking.lower() not in ("off", ""):
@@ -150,7 +155,7 @@ def load() -> Settings:
                     ],
                 }
             }
-            s.selected_model = f"{provider_id}/{model_id}"
+            s.primary_model = f"{provider_id}/{model_id}"
             migrated = True
 
         if "max_turns" in data:
@@ -170,38 +175,87 @@ def save(s: Settings) -> None:
     """Save settings to ~/.coding-agent/settings.json."""
     _SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
     data = {
-        "selectedModel": s.selected_model,
+        "primaryModel": s.primary_model,
         "providers": s.providers,
         "max_turns": s.max_turns,
     }
     _SETTINGS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def resolve_api_key(settings: Settings) -> str:
-    """Return the effective API key for the selected provider: provider > env."""
-    provider_id, _ = _split_selected_model(settings.selected_model)
+def resolve_api_key(settings: Settings, model: str | None = None) -> str:
+    """Return the effective API key for the given model (or primary model): provider > env."""
+    provider_id, _ = _split_selected_model(model or settings.primary_model)
     provider = settings.providers.get(provider_id, {})
     return provider.get("apiKey") or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
 
 
-def selected_model_config(settings: Settings) -> dict[str, Any] | None:
-    """Return the config dict for the currently selected model."""
-    provider_id, model_id = _split_selected_model(settings.selected_model)
+def model_config(settings: Settings, model: str | None = None) -> dict[str, Any] | None:
+    """Return the config dict for the given model (or primary model)."""
+    provider_id, model_id = _split_selected_model(model or settings.primary_model)
     provider = settings.providers.get(provider_id, {})
-    for model in provider.get("models", []):
-        if model.get("id") == model_id:
-            return model
+    for m in provider.get("models", []):
+        if m.get("id") == model_id:
+            return m
     return None
 
 
-def selected_thinking_level(settings: Settings) -> str | None:
-    """Return the default thinking level for the selected model.
+def thinking_level(settings: Settings, model: str | None = None) -> str | None:
+    """Return the default thinking level for the given model (or primary model).
 
     Uses the last entry from the model's ``thinking_level`` array,
     which is assumed to be the strongest/highest level.
     """
-    model_cfg = selected_model_config(settings)
-    levels = model_cfg.get("thinking_level") if model_cfg else None
+    cfg = model_config(settings, model)
+    levels = cfg.get("thinking_level") if cfg else None
     if isinstance(levels, list) and levels:
         return levels[-1]
     return None
+
+
+def build_client(settings: Settings, model: str | None = None) -> object:
+    """Create an LLM client for the given model (or primary model)."""
+    provider_id, model_id = _split_selected_model(model or settings.primary_model)
+    provider = settings.providers.get(provider_id, {})
+    base_url = provider.get("baseUrl", "")
+    api_key = resolve_api_key(settings, model)
+    if api_key:
+        from agent_framework_openai._chat_completion_client import RawOpenAIChatCompletionClient
+
+        logger.info(
+            "Client: provider=%s model=%s base_url=%s",
+            provider_id,
+            model_id,
+            base_url,
+        )
+        return RawOpenAIChatCompletionClient(
+            model=model_id,
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+    logger.warning("No API key found, using fake client")
+    return _FakeClient()
+
+
+class _FakeClient:
+    """Minimal fake for testing the event pipeline without a real LLM."""
+
+    async def get_response(self, messages: list[object], *, stream: bool = True, options: object = None) -> object:
+        from agent_framework._types import ChatResponse, ChatResponseUpdate, Content, Message, ResponseStream
+
+        if stream:
+
+            async def _stream():
+                yield ChatResponseUpdate(contents=[Content(type="text", text="Hello from fake agent! ")])
+                yield ChatResponseUpdate(contents=[Content(type="text", text="No real API key configured.")])
+                yield ChatResponseUpdate(finish_reason="stop")
+
+            async def _finalizer(updates):
+                texts = [u.text for u in updates if u.text]
+                return ChatResponse(messages=[Message(role="assistant", contents=texts)], finish_reason="stop")
+
+            return ResponseStream(_stream(), finalizer=_finalizer)
+
+        return ChatResponse(
+            messages=[Message(role="assistant", contents=["Hello from fake client!"])], finish_reason="stop"
+        )
