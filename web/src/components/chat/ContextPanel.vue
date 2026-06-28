@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { CheckCircle2, Clock, FolderOpen, History, Lightbulb } from '@lucide/vue'
-import { computed } from 'vue'
+import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Folder, FolderOpen, History, List, Lightbulb, Wrench } from '@lucide/vue'
+import { computed, ref } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useWorkspaceStore } from '@/stores/workspace'
 
 const chatStore = useChatStore()
 const workspaceStore = useWorkspaceStore()
+
+const progressExpanded = ref(true)
+const workspaceExpanded = ref(true)
+const opsExpanded = ref(true)
 
 const recentOps = computed(() => {
   return chatStore.messages
@@ -16,81 +20,121 @@ const recentOps = computed(() => {
       ok: m.toolExecution?.finished === true ? m.toolExecution.ok : undefined,
     }))
 })
+
+const toolUsage = computed(() => {
+  const counts: Record<string, number> = {}
+  for (const m of chatStore.messages) {
+    if (m.role === 'tool') {
+      const name = m.toolCall?.name || m.toolExecution?.name || ''
+      if (name) counts[name] = (counts[name] || 0) + 1
+    }
+  }
+  return Object.entries(counts).map(([name, count]) => ({ name, count }))
+})
 </script>
 
 <template>
-  <aside class="h-full w-72 flex-shrink-0 border-l border-[var(--border)] bg-[var(--bg-page)] flex flex-col">
-    <div class="h-14 flex items-center px-5 border-b border-[var(--border)]">
-      <span class="text-sm font-medium">进度</span>
-    </div>
-
-    <div class="flex-1 overflow-y-auto py-4 px-4 space-y-5">
-      <div class="rounded-xl bg-[var(--bg-card)] border border-[var(--border)] p-4 shadow-[var(--shadow)]">
-        <div class="flex items-center gap-2 text-[var(--text-muted)] text-xs mb-3">
-          <Clock class="w-3.5 h-3.5" />
-          <span>任务执行进度</span>
+  <aside class="h-full w-72 flex-shrink-0 border-l border-[var(--border)] bg-[var(--bg-page)] flex flex-col overflow-y-auto">
+    <!-- 进度 -->
+    <div class="border-b border-[var(--border)]">
+      <button
+        class="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--bg-muted)] transition"
+        @click="progressExpanded = !progressExpanded"
+      >
+        <div class="flex items-center gap-2 text-sm font-medium">
+          <List class="w-4 h-4 text-[var(--text-muted)]" />
+          <span>进度</span>
         </div>
-        <p class="text-sm text-[var(--text-muted)]">
+        <ChevronDown class="w-4 h-4 text-[var(--text-muted)] transition-transform" :class="progressExpanded ? '' : '-rotate-90'" />
+      </button>
+      <div v-show="progressExpanded" class="px-4 pb-4">
+        <div class="flex items-center justify-center gap-1 py-6">
+          <div class="w-3 h-3 rounded-full border-2 border-[var(--text-subtle)]" />
+          <div class="w-8 h-px bg-[var(--text-subtle)]" />
+          <div class="w-3 h-3 rounded-full border-2 border-[var(--text-subtle)]" />
+          <div class="w-8 h-px bg-[var(--text-subtle)]" />
+          <div class="w-3 h-3 rounded-full border-2 border-[var(--text-subtle)]" />
+          <div class="w-8 h-px bg-[var(--text-subtle)]" />
+          <div class="w-3 h-3 rounded-full border-2 border-[var(--text-subtle)]" />
+        </div>
+        <p class="text-center text-xs text-[var(--text-subtle)]">
           任务执行进度将显示在这里
         </p>
       </div>
+    </div>
 
-      <div>
-        <div class="flex items-center justify-between px-1 mb-2">
-          <span class="text-xs font-medium text-[var(--text-muted)]">工作区</span>
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-muted)] text-[var(--text-subtle)]">
+    <!-- 工作区 -->
+    <div class="border-b border-[var(--border)]">
+      <button
+        class="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--bg-muted)] transition"
+        @click="workspaceExpanded = !workspaceExpanded"
+      >
+        <div class="flex items-center gap-2 text-sm font-medium">
+          <Folder class="w-4 h-4 text-[var(--text-muted)]" />
+          <span>工作区</span>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-[#d9896d]/10 text-[#d9896d] font-medium">
             {{ workspaceStore.workspace?.name || '-' }}
           </span>
         </div>
-        <div class="rounded-xl bg-[var(--bg-card)] border border-[var(--border)] p-3 shadow-[var(--shadow)] flex items-center gap-2">
-          <FolderOpen class="w-4 h-4 text-[var(--text-subtle)]" />
-          <div class="min-w-0">
-            <div class="text-sm truncate">
+        <div class="flex items-center gap-1">
+          <ExternalLink class="w-3.5 h-3.5 text-[var(--text-muted)]" />
+          <ChevronDown class="w-4 h-4 text-[var(--text-muted)] transition-transform" :class="workspaceExpanded ? '' : '-rotate-90'" />
+        </div>
+      </button>
+      <div v-show="workspaceExpanded" class="px-4 pb-4 space-y-2">
+        <div class="rounded-xl bg-[var(--bg-card)] border border-[var(--border)] p-3 flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-lg bg-orange-50 flex items-center justify-center flex-shrink-0">
+            <FolderOpen class="w-5 h-5 text-orange-400" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-medium truncate">
               {{ workspaceStore.workspace?.name || '未获取到工作区' }}
             </div>
             <div class="text-xs text-[var(--text-subtle)] truncate">
               {{ workspaceStore.workspace?.path || '' }}
             </div>
           </div>
+          <ChevronDown class="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
         </div>
-      </div>
 
-      <div>
-        <div class="px-1 mb-2 text-xs font-medium text-[var(--text-muted)]">
-          项目指令 · 点击添加
-        </div>
-        <div class="rounded-xl bg-[var(--bg-card)] border border-[var(--border)] p-3 shadow-[var(--shadow)] text-sm text-[var(--text-muted)]">
-          暂无项目指令
-        </div>
-      </div>
+        <button class="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
+          <span class="text-[var(--text-subtle)]">📋</span>
+          <span>项目指令 · 点击添加</span>
+        </button>
 
-      <div>
-        <div class="px-1 mb-2 text-xs font-medium text-[var(--text-muted)]">
-          项目记忆
-        </div>
-        <div class="rounded-xl bg-[var(--bg-card)] border border-[var(--border)] p-3 shadow-[var(--shadow)] text-sm text-[var(--text-muted)] flex items-center gap-2">
-          <Lightbulb class="w-4 h-4" />
-          暂无项目记忆
-        </div>
+        <button class="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-muted)] hover:bg-[var(--bg-muted)] transition">
+          <span class="text-[var(--text-subtle)]">🧠</span>
+          <span>项目记忆 · 暂无</span>
+        </button>
       </div>
+    </div>
 
-      <div>
-        <div class="px-1 mb-2 text-xs font-medium text-[var(--text-muted)] flex items-center gap-1">
-          <History class="w-3.5 h-3.5" />
-          <span>操作记录 {{ recentOps.length }} ops</span>
+    <!-- 操作记录 -->
+    <div>
+      <button
+        class="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--bg-muted)] transition"
+        @click="opsExpanded = !opsExpanded"
+      >
+        <div class="flex items-center gap-2 text-sm font-medium">
+          <History class="w-4 h-4 text-[var(--text-muted)]" />
+          <span>操作记录</span>
+          <span v-if="recentOps.length" class="text-xs text-[var(--text-muted)]">{{ recentOps.length }} ops</span>
         </div>
-        <ul v-if="recentOps.length" class="space-y-1.5">
-          <li
-            v-for="(op, idx) in recentOps"
-            :key="idx"
+        <ChevronDown class="w-4 h-4 text-[var(--text-muted)] transition-transform" :class="opsExpanded ? '' : '-rotate-90'" />
+      </button>
+      <div v-show="opsExpanded" class="px-4 pb-4">
+        <div v-if="toolUsage.length" class="space-y-2">
+          <div class="text-xs text-[var(--text-muted)] px-1">工具使用</div>
+          <div
+            v-for="op in toolUsage"
+            :key="op.name"
             class="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border)]"
           >
-            <CheckCircle2 v-if="op.ok === true" class="w-4 h-4 text-green-600" />
-            <CheckCircle2 v-else-if="op.ok === false" class="w-4 h-4 text-red-600" />
-            <span v-else class="w-4 h-4 rounded-full border-2 border-[var(--text-subtle)]" />
+            <Wrench class="w-3.5 h-3.5 text-[var(--text-subtle)]" />
             <span class="truncate">{{ op.name }}</span>
-          </li>
-        </ul>
+            <span class="ml-auto text-xs text-[var(--text-subtle)]">x{{ op.count }}</span>
+          </div>
+        </div>
         <div v-else class="text-sm text-[var(--text-muted)] px-1">
           暂无操作记录
         </div>

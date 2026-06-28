@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import ApprovalPanel from '@/components/ApprovalPanel.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import MessageList from '@/components/chat/MessageList.vue'
@@ -12,9 +12,11 @@ const props = defineProps<{
 }>()
 
 const route = useRoute()
+const router = useRouter()
 const chatStore = useChatStore()
 const sessionsStore = useSessionsStore()
 const loading = ref(false)
+const initialMessageSent = ref(false)
 
 const currentSessionModel = computed(() => {
   const session = sessionsStore.sessions.find((s) => s.id === props.sessionId)
@@ -32,13 +34,21 @@ async function loadSessionData(id: string) {
     }
   } finally {
     loading.value = false
+    // Send initial message after session data is loaded
+    const msg = route.query.initialMessage
+    if (msg && typeof msg === 'string' && !initialMessageSent.value) {
+      initialMessageSent.value = true
+      router.replace({ query: { ...route.query, initialMessage: undefined } })
+      chatStore.sendMessage(msg, props.sessionId)
+    }
   }
 }
 
 watch(
   () => props.sessionId,
-  (id) => {
-    loadSessionData(id)
+  () => {
+    initialMessageSent.value = false
+    loadSessionData(props.sessionId)
   },
   { immediate: true },
 )

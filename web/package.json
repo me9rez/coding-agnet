@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test:unit": "vitest",
     "build-only": "vite build",
-    "type-check": "vue-tsc --build"
+    "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
     "@iconify-json/carbon": "^1.2.23",
