@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>个人介绍</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --bg-primary: #0f0f1a;
+      --bg-secondary: #1a1a2e;
+      --bg-card: #252542;
+      --text-primary: #f0f0f5;
+      --text-secondary: #b0b0c8;
+      --text-muted: #6e6e8a;
+      --accent-1: #6c5ce7;
+      --accent-2: #fd79a8;
+      --accent-3: #00cec9;
+      --accent-4: #fdcb6e;
+      --gradient-1: linear-gradient(135deg, #6c5ce7, #fd79a8);
+      --gradient-2: linear-gradient(135deg, #00cec9, #6c5ce7);
+      --gradient-bg: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+      --border-color: rgba(255, 255, 255, 0.06);
+      --shadow-card: 0 8px 32px rgba(0, 0, 0, 0.4);
+      --radius-sm: 8px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --radius-xl: 32px;
+      --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--gradient-bg);
+      color: var(--text-primary);
+      min-height: 100vh;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ---- Animated background ---- */
+    .bg-orbs {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .bg-orbs span {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(100px);
+      opacity: 0.15;
+      animation: orbFloat 20s ease-in-out infinite;
+    }
+
+    .bg-orbs .orb1 {
+      width: 600px;
+      height: 600px;
+      background: #6c5ce7;
+      top: -15%;
+      left: -10%;
+      animation-delay: 0s;
+    }
+
+    .bg-orbs .orb2 {
+      width: 500px;
+      height: 500px;
+      background: #fd79a8;
+      bottom: -20%;
+      right: -10%;
+      animation-delay: -7s;
+    }
+
+    .bg-orbs .orb3 {
+      width: 400px;
+      height: 400px;
+      background: #00cec9;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      animation-delay: -14s;
+    }
+
+    @keyframes orbFloat {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      25% { transform: translate(40px, -60px) scale(1.08); }
+      50% { transform: translate(-30px, 40px) scale(0.95); }
+      75% { transform: translate(50px, 20px) scale(1.05); }
+    }
+
+    /* ---- Layout ---- */
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ---- Nav ---- */
+    nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 0;
+      border-bottom: 1px solid var(--border-color);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(15, 15, 26, 0.7);
+    }
+
+    nav .logo {
+      font-size: 1.25rem;
+      font-weight: 800;
+      background: var(--gradient-1);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    nav .links {
+      display: flex;
+      gap: 28px;
+      list-style: none;
+    }
+
+    nav .links a {
+      text-decoration: none;
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color var(--transition);
+      position: relative;
+    }
+
+    nav .links a::after {
+      content: '';
+      position: absolute;
+      bottom: -4px;
+      left: 0;
+      width: 0;
+      height: 2px;
+      background: var(--gradient-1);
+      transition: width var(--transition);
+    }
+
+    nav .links a:hover {
+      color: var(--text-primary);
+    }
+
+    nav .links a:hover::after {
+      width: 100%;
+    }
+
+    /* ---- Hero ---- */
+    .hero {
+      display: flex;
+      align-items: center;
+      gap: 60px;
+      padding: 80px 0 60px;
+      min-height: calc(100vh - 80px);
+    }
+
+    .hero-content {
+      flex: 1;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      background: rgba(108, 92, 231, 0.15);
+      border: 1px solid rgba(108, 92, 231, 0.3);
+      border-radius: 100px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--accent-1);
+      margin-bottom: 24px;
+    }
+
+    .hero-badge .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #00cec9;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .hero h1 {
+      font-size: 3.5rem;
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -1px;
+      margin-bottom: 16px;
+    }
+
+    .hero h1 .highlight {
+      background: var(--gradient-1);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero h1 .highlight-2 {
+      background: var(--gradient-2);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero p {
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      max-width: 540px;
+      margin-bottom: 36px;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      border-radius: 100px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all var(--transition);
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--gradient-1);
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(108, 92, 231, 0.35);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(108, 92, 231, 0.5);
+    }
+
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .btn-outline:hover {
+      border-color: rgba(108, 92, 231, 0.5);
+      background: rgba(108, 92, 231, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .hero-avatar {
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .hero-avatar .avatar-ring {
+      width: 320px;
+      height: 320px;
+      border-radius: 50%;
+      padding: 6px;
+      background: var(--gradient-1);
+      animation: rotateRing 8s linear infinite;
+    }
+
+    @keyframes rotateRing {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .hero-avatar .avatar-inner {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: var(--bg-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 6rem;
+      font-weight: 800;
+      color: var(--text-primary);
+      overflow: hidden;
+    }
+
+    .hero-avatar .avatar-inner img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .hero-stats {
+      display: flex;
+      gap: 40px;
+      margin-top: 48px;
+    }
+
+    .hero-stats .stat h3 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .hero-stats .stat p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 0;
+    }
+
+    /* ---- Section common ---- */
+    section {
+      padding: 100px 0;
+    }
+
+    .section-label {
+      display: inline-block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--accent-1);
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 16px;
+    }
+
+    .section-desc {
+      color: var(--text-secondary);
+      max-width: 600px;
+      font-size: 1.05rem;
+    }
+
+    /* ---- Skills ---- */
+    .skills-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-top: 48px;
+    }
+
+    .skill-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      text-align: center;
+      transition: all var(--transition);
+      cursor: default;
+    }
+
+    .skill-item:hover {
+      transform: translateY(-4px);
+      border-color: rgba(108, 92, 231, 0.3);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .skill-item .icon {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+
+    .skill-item h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .skill-item p {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .skill-bar {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 4px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+
+    .skill-bar .fill {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--gradient-1);
+      transition: width 1s ease;
+    }
+
+    /* ---- Projects ---- */
+    .projects-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+      margin-top: 48px;
+    }
+
+    .project-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 32px;
+      transition: all var(--transition);
+    }
+
+    .project-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(108, 92, 231, 0.3);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .project-card .tag {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: rgba(108, 92, 231, 0.15);
+      color: var(--accent-1);
+      margin-bottom: 16px;
+    }
+
+    .project-card h3 {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .project-card p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .project-card .tech {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .project-card .tech span {
+      padding: 4px 12px;
+      border-radius: 100px;
+      font-size: 0.75rem;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+      border: 1px solid var(--border-color);
+    }
+
+    /* ---- Timeline ---- */
+    .timeline {
+      position: relative;
+      margin-top: 48px;
+      padding-left: 32px;
+    }
+
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 7px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--accent-1), var(--accent-2), transparent);
+    }
+
+    .timeline-item {
+      position: relative;
+      padding-bottom: 40px;
+    }
+
+    .timeline-item:last-child {
+      padding-bottom: 0;
+    }
+
+    .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: -26px;
+      top: 6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--gradient-1);
+      border: 3px solid var(--bg-primary);
+      box-shadow: 0 0 0 2px var(--accent-1);
+    }
+
+    .timeline-item .date {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--accent-1);
+      margin-bottom: 4px;
+    }
+
+    .timeline-item h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .timeline-item .sub {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .timeline-item p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    /* ---- Contact ---- */
+    .contact-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-top: 48px;
+    }
+
+    .contact-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      text-decoration: none;
+      color: var(--text-primary);
+      transition: all var(--transition);
+    }
+
+    .contact-item:hover {
+      transform: translateY(-3px);
+      border-color: rgba(108, 92, 231, 0.3);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+    }
+
+    .contact-item .icon {
+      font-size: 1.4rem;
+      flex-shrink: 0;
+    }
+
+    .contact-item .label {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .contact-item .value {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    /* ---- Footer ---- */
+    footer {
+      border-top: 1px solid var(--border-color);
+      padding: 32px 0;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    /* ---- Animations ---- */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .reveal-delay-1 { transition-delay: 0.1s; }
+    .reveal-delay-2 { transition-delay: 0.2s; }
+    .reveal-delay-3 { transition-delay: 0.3s; }
+    .reveal-delay-4 { transition-delay: 0.4s; }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 900px) {
+      .hero {
+        flex-direction: column-reverse;
+        text-align: center;
+        padding: 40px 0;
+        gap: 40px;
+      }
+
+      .hero p {
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .hero-actions {
+        justify-content: center;
+      }
+
+      .hero-stats {
+        justify-content: center;
+      }
+
+      .hero-avatar .avatar-ring {
+        width: 220px;
+        height: 220px;
+      }
+
+      .hero-avatar .avatar-inner {
+        font-size: 4rem;
+      }
+
+      .hero h1 {
+        font-size: 2.5rem;
+      }
+
+      .section-title {
+        font-size: 1.8rem;
+      }
+
+      .hero-stats {
+        gap: 24px;
+      }
+
+      .hero-stats .stat h3 {
+        font-size: 1.5rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .hero h1 {
+        font-size: 1.8rem;
+      }
+
+      nav .links {
+        gap: 16px;
+      }
+
+      nav .links a {
+        font-size: 0.8rem;
+      }
+
+      .container {
+        padding: 0 16px;
+      }
+
+      section {
+        padding: 60px 0;
+      }
+
+      .projects-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .skills-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Background Orbs -->
+  <div class="bg-orbs">
+    <span class="orb1"></span>
+    <span class="orb2"></span>
+    <span class="orb3"></span>
+  </div>
+
+  <!-- Navigation -->
+  <nav>
+    <div class="container" style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+      <div class="logo">Portfolio</div>
+      <ul class="links">
+        <li><a href="#about">关于</a></li>
+        <li><a href="#skills">技能</a></li>
+        <li><a href="#projects">项目</a></li>
+        <li><a href="#experience">经历</a></li>
+        <li><a href="#contact">联系</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="container" style="display:flex;align-items:center;gap:60px;flex-wrap:wrap;">
+        <div class="hero-content">
+          <div class="hero-badge">
+            <span class="dot"></span>
+            开放合作 / 持续成长
+          </div>
+          <h1>
+            你好，我是<br>
+            <span class="highlight">张明远</span><br>
+            <span class="highlight-2">全栈开发者</span>
+          </h1>
+          <p>
+            热爱用代码创造价值，专注于 Web 全栈开发与系统架构设计。
+            4 年经验，10+ 项目交付，相信好的技术能改变世界。
+          </p>
+          <div class="hero-actions">
+            <a href="#projects" class="btn btn-primary">查看项目</a>
+            <a href="#contact" class="btn btn-outline">联系我</a>
+          </div>
+          <div class="hero-stats">
+            <div class="stat">
+              <h3>4+</h3>
+              <p>年经验</p>
+            </div>
+            <div class="stat">
+              <h3>10+</h3>
+              <p>项目交付</p>
+            </div>
+            <div class="stat">
+              <h3>20+</h3>
+              <p>技术栈</p>
+            </div>
+          </div>
+        </div>
+        <div class="hero-avatar">
+          <div class="avatar-ring">
+            <div class="avatar-inner">JM</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section id="about">
+      <div class="container">
+        <div class="reveal">
+          <span class="section-label">关于我</span>
+          <h2 class="section-title">用代码构建更好的世界</h2>
+          <p class="section-desc">
+            从第一行 "Hello World" 到如今的全栈项目交付，编程对我来说不仅是职业，更是热情所在。
+          </p>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-top:48px;">
+          <div class="reveal reveal-delay-1" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:32px;">
+            <div style="font-size:2rem;margin-bottom:12px;">🎯</div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:8px;">追求卓越</h3>
+            <p style="font-size:0.9rem;color:var(--text-secondary);">关注代码质量与用户体验，从架构到像素都力求完美。</p>
+          </div>
+          <div class="reveal reveal-delay-2" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:32px;">
+            <div style="font-size:2rem;margin-bottom:12px;">🤝</div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:8px;">协作共赢</h3>
+            <p style="font-size:0.9rem;color:var(--text-secondary);">善于团队沟通与技术分享，相信好的协作能放大个人价值。</p>
+          </div>
+          <div class="reveal reveal-delay-3" style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:32px;">
+            <div style="font-size:2rem;margin-bottom:12px;">🚀</div>
+            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:8px;">持续学习</h3>
+            <p style="font-size:0.9rem;color:var(--text-secondary);">拥抱新技术与最佳实践，保持好奇心与成长型思维。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Skills -->
+    <section id="skills">
+      <div class="container">
+        <div class="reveal">
+          <span class="section-label">技术栈</span>
+          <h2 class="section-title">核心技能</h2>
+          <p class="section-desc">多年积累的技术广度和深度，覆盖前端、后端、运维全链路。</p>
+        </div>
+        <div class="skills-grid">
+          <div class="skill-item reveal reveal-delay-1">
+            <div class="icon">⚛️</div>
+            <h4>React / Next.js</h4>
+            <p>组件化开发，SSR/SSG</p>
+            <div class="skill-bar"><div class="fill" style="width:92%;"></div></div>
+          </div>
+          <div class="skill-item reveal reveal-delay-1">
+            <div class="icon">🟢</div>
+            <h4>Vue / Nuxt</h4>
+            <p>Composition API 生态</p>
+            <div class="skill-bar"><div class="fill" style="width:88%;"></div></div>
+          </div>
+          <div class="skill-item reveal reveal-delay-2">
+            <div class="icon">🟦</div>
+            <h4>TypeScript</h4>
+            <p>类型系统与工程化</p>
+            <div class="skill-bar"><div class="fill" style="width:90%;"></div></div>
+          </div>
+          <div class="skill-item reveal reveal-delay-2">
+            <div class="icon">🐍</div>
+            <h4>Python</h4>
+            <p>后端 / 自动化 / AI</p>
+            <div class="skill-bar"><div class="fill" style="width:85%;"></div></div>
+          </div>
+          <div class="skill-item reveal reveal-delay-3">
+            <div class="icon">🗄️</div>
+            <h4>Node.js</h4>
+            <p>API 开发 / 中间层</p>
+            <div class="skill-bar"><div class="fill" style="width:86%;"></div></div>
+          </div>
+          <div class="skill-item reveal reveal-delay-3">
+            <div class="icon">🐘</div>
+            <h4>PostgreSQL</h4>
+            <p>数据建模与优化</p>
+            <div class="skill-bar"><div class="fill" style="width:82%;"></div></div>
+          </div>
+          <div class="skill-item reveal reveal-delay-4">
+            <div class="icon">☁️</div>
+            <h4>Docker / K8s</h4>
+            <p>容器化与编排</p>
+            <div class="skill-bar"><div class="fill" style="width:78%;"></div></div>
+          </div>
+          <div class="skill-item reveal reveal-delay-4">
+            <div class="icon">🎨</div>
+            <h4>Tailwind / CSS</h4>
+            <p>响应式与动画</p>
+            <div class="skill-bar"><div class="fill" style="width:90%;"></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Projects -->
+    <section id="projects">
+      <div class="container">
+        <div class="reveal">
+          <span class="section-label">作品集</span>
+          <h2 class="section-title">代表性项目</h2>
+          <p class="section-desc">从 0 到 1 交付的产品级项目，涵盖不同领域与技术栈。</p>
+        </div>
+        <div class="projects-grid">
+          <div class="project-card reveal reveal-delay-1">
+            <span class="tag">全栈</span>
+            <h3>智能数据分析平台</h3>
+            <p>企业级 BI 分析工具，支持拖拽式图表构建、自定义仪表盘、多数据源接入，日活 2000+。</p>
+            <div class="tech">
+              <span>React</span>
+              <span>Node.js</span>
+              <span>PostgreSQL</span>
+              <span>Docker</span>
+            </div>
+          </div>
+          <div class="project-card reveal reveal-delay-2">
+            <span class="tag">前端</span>
+            <h3>协作白板工具</h3>
+            <p>实时协同的在线白板，支持多人同时编辑、图形绘制、批注评论，延迟低于 50ms。</p>
+            <div class="tech">
+              <span>Next.js</span>
+              <span>WebSocket</span>
+              <span>Canvas</span>
+              <span>Redis</span>
+            </div>
+          </div>
+          <div class="project-card reveal reveal-delay-3">
+            <span class="tag">后端 / AI</span>
+            <h3>智能客服机器人</h3>
+            <p>基于 LLM 的客服系统，支持多轮对话、知识库检索、工单自动流转，节省 60% 人工成本。</p>
+            <div class="tech">
+              <span>Python</span>
+              <span>FastAPI</span>
+              <span>LangChain</span>
+              <span>MongoDB</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Experience -->
+    <section id="experience">
+      <div class="container">
+        <div class="reveal">
+          <span class="section-label">职业经历</span>
+          <h2 class="section-title">成长轨迹</h2>
+          <p class="section-desc">每一步都是积累，每个项目都是成长。</p>
+        </div>
+        <div class="timeline">
+          <div class="timeline-item reveal reveal-delay-1">
+            <div class="date">2024 - 至今</div>
+            <h3>高级全栈工程师</h3>
+            <div class="sub">字节跳动 · 飞书团队</div>
+            <p>负责飞书审批系统核心模块开发，主导微服务拆分与性能优化，QPS 提升 3 倍。</p>
+          </div>
+          <div class="timeline-item reveal reveal-delay-2">
+            <div class="date">2022 - 2024</div>
+            <h3>全栈开发工程师</h3>
+            <div class="sub">某科技公司 · 技术中台</div>
+            <p>搭建公司内部开发者平台，统一 CI/CD 流程与监控体系，服务 20+ 业务线。</p>
+          </div>
+          <div class="timeline-item reveal reveal-delay-3">
+            <div class="date">2021 - 2022</div>
+            <h3>前端开发工程师</h3>
+            <div class="sub">创业公司 · 产品技术部</div>
+            <p>从 0 搭建前端工程化体系，主导 SaaS 产品 UI 重构，用户满意度提升 40%。</p>
+          </div>
+          <div class="timeline-item reveal reveal-delay-4">
+            <div class="date">2019 - 2021</div>
+            <h3>计算机科学与技术 · 本科</h3>
+            <div class="sub">某某大学</div>
+            <p>在校期间获 ACM 区域赛银奖，参与多个开源项目贡献。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Contact -->
+    <section id="contact">
+      <div class="container">
+        <div class="reveal" style="text-align:center;">
+          <span class="section-label">联系我</span>
+          <h2 class="section-title">保持联系</h2>
+          <p class="section-desc" style="margin:0 auto;">欢迎技术交流、合作邀约或任何想法。</p>
+        </div>
+        <div class="contact-grid">
+          <a href="mailto:mingyuan.zhang@example.com" class="contact-item reveal reveal-delay-1">
+            <span class="icon">📧</span>
+            <div>
+              <div class="label">邮箱</div>
+              <div class="value">mingyuan.z@email.com</div>
+            </div>
+          </a>
+          <a href="https://github.com" target="_blank" class="contact-item reveal reveal-delay-2">
+            <span class="icon">💻</span>
+            <div>
+              <div class="label">GitHub</div>
+              <div class="value">@mingyuan-dev</div>
+            </div>
+          </a>
+          <a href="https://linkedin.com" target="_blank" class="contact-item reveal reveal-delay-3">
+            <span class="icon">🔗</span>
+            <div>
+              <div class="label">LinkedIn</div>
+              <div class="value">in/mingyuan-zhang</div>
+            </div>
+          </a>
+          <a href="https://weixin.qq.com" target="_blank" class="contact-item reveal reveal-delay-4">
+            <span class="icon">💬</span>
+            <div>
+              <div class="label">微信</div>
+              <div class="value">my_dev_2024</div>
+            </div>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2026 张明远 · 用 ❤️ 和代码构建</p>
+    </div>
+  </footer>
+
+  <!-- Scroll reveal -->
+  <script>
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15 });
+
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  </script>
+</body>
+</html>
