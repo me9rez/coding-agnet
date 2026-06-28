@@ -62,6 +62,19 @@ export interface ErrorEvent extends GatewayEvent {
   recoverable: boolean
 }
 
+export interface ToolApprovalRequestEvent extends GatewayEvent {
+  type: 'tool_approval_request'
+  callId: string
+  name: string
+  arguments: string
+}
+
+export interface ToolApprovalResponseEvent extends GatewayEvent {
+  type: 'tool_approval_response'
+  callId: string
+  approved: boolean
+}
+
 export interface WorkspaceInfo {
   name: string
   path: string
@@ -93,6 +106,8 @@ export type AgentEvent =
   | TurnEndEvent
   | DoneEvent
   | ErrorEvent
+  | ToolApprovalRequestEvent
+  | ToolApprovalResponseEvent
   | ReadyEvent
   | RpcResponseEvent
 
@@ -138,4 +153,12 @@ export function isReadyEvent(event: GatewayEvent): event is ReadyEvent {
 
 export function isRpcResponseEvent(event: GatewayEvent): event is RpcResponseEvent {
   return event.type === 'rpc_response'
+}
+
+export function isToolApprovalRequestEvent(event: GatewayEvent): event is ToolApprovalRequestEvent {
+  return event.type === 'tool_approval_request'
+}
+
+export function isToolApprovalResponseEvent(event: GatewayEvent): event is ToolApprovalResponseEvent {
+  return event.type === 'tool_approval_response'
 }

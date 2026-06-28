@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import ApprovalPanel from '@/components/ApprovalPanel.vue'
 import ChatHeader from '@/components/chat/ChatHeader.vue'
 import ChatInput from '@/components/chat/ChatInput.vue'
 import ContextPanel from '@/components/chat/ContextPanel.vue'
@@ -67,6 +68,12 @@ function handleStop() {
         class="flex-1 overflow-y-auto"
       />
       <EmptyState v-else @send="handleUseSuggestion" @use-suggestion="handleUseSuggestion" />
+      <div
+        v-if="sessionsStore.currentSessionId || chatStore.messages.length > 0"
+        class="px-4 pb-2"
+      >
+        <ApprovalPanel />
+      </div>
       <ChatInput
         v-if="sessionsStore.currentSessionId || chatStore.messages.length > 0"
         ref="chatInputRef"

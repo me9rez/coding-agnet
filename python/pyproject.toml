@@ -11,6 +11,7 @@ dependencies = [
     "agent-framework-anthropic>=1.0.0b260618",
     "agent-framework-core>=1.9.0",
     "agent-framework-openai>=1.8.2",
+    "agent-framework-orchestrations>=1.0.0",
     "mcp>=1.21.1",
     "websockets>=15.0",
 ]
@@ -20,6 +21,10 @@ coding-agent = "coding_agent.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/coding_agent"]
+
+[[tool.uv.index]]
+url = "http://mirrors.aliyun.com/pypi/simple"
+default = true
 
 [tool.ruff]
 line-length = 120

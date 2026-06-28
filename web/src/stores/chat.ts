@@ -7,6 +7,7 @@ import {
   isErrorEvent,
   isTextDeltaEvent,
   isThinkingDeltaEvent,
+  isToolApprovalRequestEvent,
   isToolCallStartEvent,
   isToolExecutionDeltaEvent,
   isToolExecutionEndEvent,
@@ -15,19 +16,44 @@ import {
 } from '@/types/gateway'
 import { generateId } from '@/utils/uid'
 
-export type RunState = 'idle' | 'running'
+export type RunState = 'idle' | 'running' | 'waiting_approval'
+
+export interface PendingApproval {
+  callId: string
+  name: string
+  arguments: string
+}
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<UiMessage[]>([])
   const runState = ref<RunState>('idle')
   const error = ref<string | null>(null)
+  const pendingApprovals = ref<PendingApproval[]>([])
 
-  const isRunning = computed(() => runState.value === 'running')
+  const isRunning = computed(() => runState.value === 'running' || runState.value === 'waiting_approval')
 
   function reset() {
     messages.value = []
     runState.value = 'idle'
     error.value = null
+    pendingApprovals.value = []
+  }
+
+  function addPendingApproval(approval: PendingApproval) {
+    pendingApprovals.value.push(approval)
+    runState.value = 'waiting_approval'
+  }
+
+  function removePendingApproval(callId: string) {
+    pendingApprovals.value = pendingApprovals.value.filter((a) => a.callId !== callId)
+    if (pendingApprovals.value.length === 0 && runState.value === 'waiting_approval') {
+      runState.value = 'running'
+    }
+  }
+
+  function sendApprovalResponse(callId: string, approved: boolean, remember = false) {
+    gatewayService.sendApprovalResponse(callId, approved, remember)
+    removePendingApproval(callId)
   }
 
   function loadSession(session: SessionData) {
@@ -185,6 +211,15 @@ export const useChatStore = defineStore('chat', () => {
         error.value = event.message
       }
     })
+    gatewayService.on('tool_approval_request', (event) => {
+      if (isToolApprovalRequestEvent(event)) {
+        addPendingApproval({
+          callId: event.callId,
+          name: event.name,
+          arguments: event.arguments,
+        })
+      }
+    })
   }
 
   return {
@@ -192,11 +227,13 @@ export const useChatStore = defineStore('chat', () => {
     runState,
     isRunning,
     error,
+    pendingApprovals,
     reset,
     loadSession,
     sendMessage,
     stop,
     setupEventListeners,
+    sendApprovalResponse,
   }
 })
 

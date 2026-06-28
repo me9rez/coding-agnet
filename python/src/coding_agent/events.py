@@ -109,6 +109,29 @@ class UsageEvent:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+# ── Human-in-the-loop approval events ──────────────────────────────
+
+
+@dataclass
+class ToolApprovalRequestEvent:
+    """A tool call is waiting for human approval before execution."""
+
+    type: Literal["tool_approval_request"] = "tool_approval_request"
+    call_id: str = ""
+    name: str = ""
+    arguments: str = ""
+
+
+@dataclass
+class ToolApprovalResponseEvent:
+    """A human approval/rejection decision for a pending tool call."""
+
+    type: Literal["tool_approval_response"] = "tool_approval_response"
+    call_id: str = ""
+    approved: bool = False
+    reason: str = ""
+
+
 # ── Union type for all events ──────────────────────────────────────
 
 
@@ -123,4 +146,6 @@ AgentEvent = (
     | DoneEvent
     | ErrorEvent
     | UsageEvent
+    | ToolApprovalRequestEvent
+    | ToolApprovalResponseEvent
 )

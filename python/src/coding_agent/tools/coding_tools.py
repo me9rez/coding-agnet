@@ -54,6 +54,7 @@ def create_coding_tools() -> list[FunctionTool]:
             description="Execute a shell command",
             func=_bash,
             result_parser=SKIP_PARSING,
+            approval_mode="always_require",
         ),
         FunctionTool(
             name="read",
@@ -66,6 +67,7 @@ def create_coding_tools() -> list[FunctionTool]:
             description="Write content to a file (creates parent dirs)",
             func=_file_write,
             result_parser=SKIP_PARSING,
+            approval_mode="always_require",
         ),
         FunctionTool(
             name="edit",
@@ -76,6 +78,7 @@ def create_coding_tools() -> list[FunctionTool]:
             ),
             func=_edit,
             result_parser=SKIP_PARSING,
+            approval_mode="always_require",
         ),
         FunctionTool(
             name="search",

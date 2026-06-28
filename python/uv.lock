@@ -48,6 +48,18 @@ wheels = [
 ]
 
 [[package]]
+name = "agent-framework-orchestrations"
+version = "1.0.0"
+source = { registry = "http://mirrors.aliyun.com/pypi/simple" }
+dependencies = [
+    { name = "agent-framework-core" },
+]
+sdist = { url = "http://mirrors.aliyun.com/pypi/packages/7a/98/1f943e3a383bf37af24f1cc3ab3812fbe2041b65bc2e2f82626352907190/agent_framework_orchestrations-1.0.0.tar.gz", hash = "sha256:7f4d26de1ac0b2add3742964836927df44138e79d16bbf084d6e866f1d4b5aff" }
+wheels = [
+    { url = "http://mirrors.aliyun.com/pypi/packages/48/cc/64448d22e95db33bb7701d3a2bb8888d39f2fa8f4e410bd24232417c9ea3/agent_framework_orchestrations-1.0.0-py3-none-any.whl", hash = "sha256:1f0885c3de69c919bb631f7e4e24727d94733b135a1529ab88ffa47bf18a2878" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.7.0"
 source = { registry = "http://mirrors.aliyun.com/pypi/simple" }
@@ -158,6 +170,7 @@ dependencies = [
     { name = "agent-framework-anthropic" },
     { name = "agent-framework-core" },
     { name = "agent-framework-openai" },
+    { name = "agent-framework-orchestrations" },
     { name = "mcp" },
     { name = "websockets" },
 ]
@@ -175,6 +188,7 @@ requires-dist = [
     { name = "agent-framework-anthropic", specifier = ">=1.0.0b260618" },
     { name = "agent-framework-core", specifier = ">=1.9.0" },
     { name = "agent-framework-openai", specifier = ">=1.8.2" },
+    { name = "agent-framework-orchestrations", specifier = ">=1.0.0" },
     { name = "mcp", specifier = ">=1.21.1" },
     { name = "websockets", specifier = ">=15.0" },
 ]

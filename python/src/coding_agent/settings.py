@@ -80,6 +80,8 @@ class Settings:
     providers: dict[str, Any] = field(default_factory=_default_providers)
     max_turns: int = 25
     mcp_servers: dict[str, Any] = field(default_factory=dict)
+    workflow_loop: bool = False
+    tool_approval: dict[str, Any] = field(default_factory=lambda: {"enabled": True})
 
 
 def _default_settings() -> Settings:
@@ -165,6 +167,14 @@ def load() -> Settings:
             s.mcp_servers = data["mcpServers"]
         elif "mcp_servers" in data:
             s.mcp_servers = data["mcp_servers"]
+        if "workflowLoop" in data:
+            s.workflow_loop = bool(data["workflowLoop"])
+        elif "workflow_loop" in data:
+            s.workflow_loop = bool(data["workflow_loop"])
+        if "toolApproval" in data:
+            s.tool_approval = data["toolApproval"]
+        elif "tool_approval" in data:
+            s.tool_approval = data["tool_approval"]
 
         if migrated:
             save(s)
@@ -184,6 +194,8 @@ def save(s: Settings) -> None:
         "providers": s.providers,
         "max_turns": s.max_turns,
         "mcpServers": s.mcp_servers,
+        "workflowLoop": s.workflow_loop,
+        "toolApproval": s.tool_approval,
     }
     _SETTINGS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 

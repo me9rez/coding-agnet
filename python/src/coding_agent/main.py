@@ -123,6 +123,10 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
     """Run one prompt in CLI test mode, printing events to stderr."""
     from agent_framework._types import Message
 
+    from coding_agent.framework_session import (
+        get_or_create_framework_session,
+        save_framework_session,
+    )
     from coding_agent.loop import run_coding_agent
     from coding_agent.system_prompt import (
         BuildSystemPromptOptions,
@@ -133,8 +137,13 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
     client = _build_client(settings)
     tools = create_coding_tools()
     skill_provider = create_skills_provider()
-    mcp_tools = create_mcp_tools(settings)
-    mcp_tools_prompt = format_mcp_tools_for_prompt(mcp_tools)
+    try:
+        mcp_tools = create_mcp_tools(settings)
+        mcp_tools_prompt = format_mcp_tools_for_prompt(mcp_tools)
+    except Exception as exc:
+        logger.warning("MCP tools unavailable in test mode: %s", exc)
+        mcp_tools = []
+        mcp_tools_prompt = ""
     messages: list[Message] = [Message(role="user", contents=[prompt])]
     ctx = discover_project_context()
     sys_prompt = build_system_prompt(
@@ -159,6 +168,73 @@ async def _run_test_mode(prompt: str, settings: Settings) -> None:
     model_cfg = model_config(settings)
     lvl = thinking_level(settings)
     max_tok = model_cfg.get("contextWindow") if model_cfg else None
+    if settings.workflow_loop:
+        from coding_agent.workflow_loop import (
+            PendingApproval,
+            WorkflowOutput,
+            resume_coding_workflow,
+            run_coding_workflow,
+        )
+
+        framework_session = get_or_create_framework_session("test-mode")
+        approval_enabled = bool(getattr(settings, "tool_approval", {}).get("enabled", True))
+        try:
+            result = await run_coding_workflow(
+                client=client,  # type: ignore[arg-type]
+                messages=messages,
+                tools=tools,
+                on_event=on_event,
+                system_prompt=sys_prompt,
+                thinking_level=lvl,
+                skill_provider=skill_provider,
+                mcp_tools=mcp_tools,
+                framework_session=framework_session,
+                approval_enabled=approval_enabled,
+            )
+            if isinstance(result, PendingApproval):
+                print(
+                    f"PENDING_APPROVAL: {result.name}({result.arguments})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                print(
+                    f"SESSION_BEFORE_RESUME: {framework_session.to_dict()}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                # Auto-approve for CLI test mode so the run can complete.
+                resumed = await resume_coding_workflow(
+                    pending=result,
+                    approved=True,
+                    framework_session=framework_session,
+                    client=client,  # type: ignore[arg-type]
+                    tools=tools,
+                    on_event=on_event,
+                    system_prompt=sys_prompt,
+                    thinking_level=lvl,
+                    skill_provider=skill_provider,
+                    mcp_tools=mcp_tools,
+                    approval_enabled=approval_enabled,
+                )
+                if isinstance(resumed, WorkflowOutput):
+                    print(f"Final: {resumed.text}", file=sys.stderr)
+                elif isinstance(resumed, PendingApproval):
+                    print(
+                        f"PENDING_APPROVAL: {resumed.name}({resumed.arguments})",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            elif isinstance(result, WorkflowOutput):
+                print(f"Final: {result.text}", file=sys.stderr)
+        finally:
+            print(
+                f"SESSION_AFTER: {framework_session.to_dict()}",
+                file=sys.stderr,
+                flush=True,
+            )
+            save_framework_session(framework_session)
+        return
+
     await run_coding_agent(
         client=client,  # type: ignore[arg-type]
         messages=messages,

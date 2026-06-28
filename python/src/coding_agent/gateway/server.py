@@ -29,11 +29,17 @@ from coding_agent.events import (
     ErrorEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
+    ToolApprovalRequestEvent,
+    ToolApprovalResponseEvent,
     ToolCallStartEvent,
     ToolExecutionDeltaEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     TurnEndEvent,
+)
+from coding_agent.framework_session import (
+    get_or_create_framework_session,
+    save_framework_session,
 )
 from coding_agent.gateway.transport import StdioTransport
 from coding_agent.loop import run_coding_agent
@@ -70,6 +76,10 @@ def _serialize_event(event: AgentEvent) -> dict[str, Any]:
             return {"type": "done"}
         case ErrorEvent(message=m, recoverable=r):
             return {"type": "error", "message": m, "recoverable": r}
+        case ToolApprovalRequestEvent(call_id=rid, name=n, arguments=a):
+            return {"type": "tool_approval_request", "callId": rid, "name": n, "arguments": a}
+        case ToolApprovalResponseEvent(call_id=rid, approved=ap):
+            return {"type": "tool_approval_response", "callId": rid, "approved": ap}
     return {"type": "unknown", "raw": str(event)}
 
 
@@ -131,6 +141,7 @@ class GatewayServer:
         self._settings = settings
         self._skill_provider = skill_provider
         self._mcp_tools = mcp_tools or []
+        self._pending_approvals: dict[str, Any] = {}
 
     def _emit(self, event: AgentEvent) -> None:
         """Serialize and write one event to the transport."""
@@ -179,6 +190,13 @@ class GatewayServer:
                     if self._current_task and not self._current_task.done():
                         self._current_task.cancel()
                     self._current_task = asyncio.create_task(self._handle_prompt(text, session_id))
+            elif method == "approval_response":
+                call_id = params.get("callId", "")
+                approved = bool(params.get("approved", False))
+                if call_id in self._pending_approvals:
+                    self._current_task = asyncio.create_task(self._resume_approval(call_id, approved))
+                else:
+                    logger.warning("No pending approval: %s", call_id)
             else:
                 logger.warning("Unknown method: %s", method)
 
@@ -231,20 +249,54 @@ class GatewayServer:
                 mcp_tools_prompt=mcp_tools_prompt,
             )
         )
+        from coding_agent.workflow_loop import PendingApproval, WorkflowOutput, run_coding_workflow
+
+        use_workflow = bool(getattr(self._settings, "workflow_loop", False))
+        framework_session = get_or_create_framework_session(session.id)
+        approval_enabled = bool(getattr(self._settings, "tool_approval", {}).get("enabled", True))
+        result: Any = None
         try:
             thinking = getattr(self._settings, "thinking_level", "") if self._settings else ""
             max_tok = getattr(self._settings, "max_context_tokens", None) if self._settings else None
-            await run_coding_agent(
-                client=self._client,
-                messages=messages,  # type: ignore[arg-type]
-                tools=self._tools,
-                on_event=self._emit,
-                system_prompt=sys_prompt,
-                thinking_level=thinking or None,
-                compaction_max_tokens=max_tok,
-                skill_provider=self._skill_provider,
-                mcp_tools=self._mcp_tools,
-            )
+            if use_workflow:
+                result = await run_coding_workflow(
+                    client=self._client,
+                    messages=messages,  # type: ignore[arg-type]
+                    tools=self._tools,
+                    on_event=self._emit,
+                    system_prompt=sys_prompt,
+                    thinking_level=thinking or None,
+                    skill_provider=self._skill_provider,
+                    mcp_tools=self._mcp_tools,
+                    framework_session=framework_session,
+                    approval_enabled=approval_enabled,
+                )
+                if isinstance(result, PendingApproval):
+                    self._pending_approvals[result.call_id] = {
+                        "pending": result,
+                        "framework_session": framework_session,
+                        "client": self._client,
+                        "tools": self._tools,
+                        "system_prompt": sys_prompt,
+                        "thinking_level": thinking or None,
+                        "skill_provider": self._skill_provider,
+                        "mcp_tools": self._mcp_tools,
+                        "approval_enabled": approval_enabled,
+                    }
+                    save_framework_session(framework_session)
+                    return
+            else:
+                await run_coding_agent(
+                    client=self._client,
+                    messages=messages,  # type: ignore[arg-type]
+                    tools=self._tools,
+                    on_event=self._emit,
+                    system_prompt=sys_prompt,
+                    thinking_level=thinking or None,
+                    compaction_max_tokens=max_tok,
+                    skill_provider=self._skill_provider,
+                    mcp_tools=self._mcp_tools,
+                )
         except asyncio.CancelledError:
             logger.info("Agent run cancelled")
             self._emit(ErrorEvent(message="Agent run cancelled", recoverable=True))
@@ -254,7 +306,65 @@ class GatewayServer:
             self._emit(ErrorEvent(message=str(exc), recoverable=False))
             self._emit(DoneEvent())
         finally:
-            # Save messages (skip system prompt message at index 0)
-            has_sys = messages and getattr(messages[0], "role", "") == "system"
-            session.messages = [message_to_dict(m) for m in (messages[1:] if has_sys else messages)]
+            if isinstance(result, WorkflowOutput):
+                session.messages = [message_to_dict(m) for m in result.messages]
+            else:
+                # Save messages (skip system prompt message at index 0)
+                has_sys = messages and getattr(messages[0], "role", "") == "system"
+                session.messages = [message_to_dict(m) for m in (messages[1:] if has_sys else messages)]
             save_session(session)
+            save_framework_session(framework_session)
+
+    async def _resume_approval(self, call_id: str, approved: bool) -> None:
+        """Resume a workflow paused for tool approval."""
+        from coding_agent.session import message_to_dict, save_session
+        from coding_agent.workflow_loop import PendingApproval, WorkflowOutput, resume_coding_workflow
+
+        info = self._pending_approvals.pop(call_id, None)
+        if info is None:
+            return
+        pending: PendingApproval = info["pending"]
+        framework_session = info.get("framework_session")
+        session: Any = self._session
+        try:
+            result = await resume_coding_workflow(
+                pending=pending,
+                approved=approved,
+                framework_session=framework_session,
+                client=info.get("client"),
+                tools=info.get("tools"),
+                on_event=self._emit,
+                system_prompt=info.get("system_prompt"),
+                thinking_level=info.get("thinking_level"),
+                skill_provider=info.get("skill_provider"),
+                mcp_tools=info.get("mcp_tools"),
+                approval_enabled=info.get("approval_enabled", True),
+            )
+            if isinstance(result, PendingApproval):
+                self._pending_approvals[result.call_id] = {
+                    "pending": result,
+                    "framework_session": framework_session,
+                    "client": info.get("client"),
+                    "tools": info.get("tools"),
+                    "system_prompt": info.get("system_prompt"),
+                    "thinking_level": info.get("thinking_level"),
+                    "skill_provider": info.get("skill_provider"),
+                    "mcp_tools": info.get("mcp_tools"),
+                    "approval_enabled": info.get("approval_enabled", True),
+                }
+            elif isinstance(result, WorkflowOutput):
+                if session is not None:
+                    session.messages = [message_to_dict(m) for m in result.messages]
+                    save_session(session)
+                self._emit(DoneEvent())
+        except asyncio.CancelledError:
+            logger.info("Approval resume cancelled")
+            self._emit(ErrorEvent(message="Agent run cancelled", recoverable=True))
+            self._emit(DoneEvent())
+        except Exception as exc:
+            logger.exception("Approval resume failed")
+            self._emit(ErrorEvent(message=str(exc), recoverable=False))
+            self._emit(DoneEvent())
+        finally:
+            if framework_session is not None:
+                save_framework_session(framework_session)
